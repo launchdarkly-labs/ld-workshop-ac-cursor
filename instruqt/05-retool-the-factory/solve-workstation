@@ -1,0 +1,264 @@
+#!/bin/bash
+#
+# Skip path for challenge 05. Cannot drive the cloud agents, so it does the
+# learner's edit and stands in for the second run by hand:
+#
+#   1. PATCH the flag implementer's `default` variation so its instructions
+#      carry the shift2- naming convention (the learner's actual work)
+#   2. open the second learner pull request if it does not exist
+#   3. create a shift2- prefixed flag (dark) and two metrics
+#   4. open a second automation-style pull request carrying a manifest
+#   5. post per-phase status comments and the verdict on the learner's PR
+#
+# Request shapes: the variation PATCH is the same partial update the
+# config-bridge's `upgrade` command sends ({instructions, comment} to
+# /projects/{proj}/ai-configs/{cfg}/variations/{var} with LD-API-Version:
+# beta). The flag and metric bodies mirror AutoFactory's create_flag and
+# create_metric tools, as in challenge 03's solve.
+#
+# The instructions text is handled with python3's JSON codec rather than the
+# sed-then-jq pattern the read-only checks use: that sed doubles every
+# backslash so jq can parse the response, which is fine for grepping but
+# would corrupt the text if it were written back.
+
+set -eu
+
+LD_PROJECT_KEY="${LD_PROJECT_KEY:-$(agent variable get projectkey 2>/dev/null)}"
+AF_REPO="${AF_REPO:-$(agent variable get af_repo 2>/dev/null)}"
+API="https://app.launchdarkly.com/api/v2"
+WORK=/opt/ld/autofactory-app
+
+PREFIX="shift2-"
+CONFIG_KEY="autofactory-flag-implementer"
+RULE_SENTENCE="Naming convention for this factory: every flag key you create must start with the prefix shift2- (for example shift2-enable-refresh-greeting). Apply the prefix to the flag key only, not to the flag name."
+
+LEARNER_BRANCH="shift-2-refresh-greeting"
+AGENT_BRANCH="autofactory/${LEARNER_BRANCH}"
+FLAG_KEY="${PREFIX}enable-refresh-greeting"
+METRIC_ERR="${FLAG_KEY}-error-rate"
+METRIC_BIZ="${FLAG_KEY}-success-rate"
+MANIFEST=".release-flags/${LEARNER_BRANCH}.json"
+
+###################
+# 1. Instruction edit
+###################
+CONFIG=$(curl -fsS -X GET \
+  "${API}/projects/${LD_PROJECT_KEY}/ai-configs/${CONFIG_KEY}" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+  -H "LD-API-Version: beta")
+
+PATCH_BODY=$(echo "$CONFIG" | RULE_SENTENCE="$RULE_SENTENCE" PREFIX="$PREFIX" python3 -c '
+import json, os, sys
+cfg = json.load(sys.stdin)
+default = next(v for v in cfg.get("variations", []) if v.get("key") == "default")
+text = default.get("instructions") or ""
+if os.environ["PREFIX"] not in text:
+    text = text.rstrip() + "\n\n" + os.environ["RULE_SENTENCE"] + "\n"
+    print(json.dumps({"instructions": text, "comment": "solve: add shift2- flag key naming convention"}))
+')
+
+if [ -n "$PATCH_BODY" ]; then
+  curl -fsS -X PATCH \
+    "${API}/projects/${LD_PROJECT_KEY}/ai-configs/${CONFIG_KEY}/variations/default" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+    -H "LD-API-Version: beta" \
+    -H "Content-Type: application/json" \
+    --data-raw "$PATCH_BODY" >/dev/null
+  echo "instructions patched with ${PREFIX} convention"
+else
+  echo "instructions already carry ${PREFIX}"
+fi
+
+cd "$WORK"
+git fetch origin --prune
+
+pr_number_for_branch() {
+  gh pr list --repo "$AF_REPO" --state all --head "$1" --json number,state \
+    -q '[.[] | select(.state == "OPEN" or .state == "MERGED")][0].number // empty'
+}
+
+###################
+# 2. Second learner PR
+###################
+LEARNER_PR="$(pr_number_for_branch "$LEARNER_BRANCH")"
+if [ -z "$LEARNER_PR" ]; then
+  git checkout -B "$LEARNER_BRANCH" origin/main
+  cat > frontend/server.mjs <<'EOF'
+/**
+ * Demo frontend (Node / Express). Serves a tiny page and the status contract.
+ *   GET /api/status -> { service, version }   (version = deployed SHA)
+ *   GET /          -> a page that fetches the backend greeting
+ *
+ * The page variant could be gated by a frontend flag; kept minimal here.
+ */
+
+import express from "express";
+
+const SHA = process.env.RAILWAY_GIT_COMMIT_SHA || "dev";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
+const app = express();
+
+app.get("/api/status", (_req, res) => {
+  res.json({ service: "demo-frontend", version: SHA });
+});
+
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"><title>Auto-Factory Demo</title></head>
+<body style="font-family:system-ui;max-width:40rem;margin:4rem auto">
+  <h1>LaunchDarkly Auto-Factory — Demo</h1>
+  <p>Frontend deployed SHA: <code>${SHA}</code></p>
+  <p id="greeting">Loading greeting from backend…</p>
+  <button id="refresh" type="button">Refresh greeting</button>
+  <script>
+    function loadGreeting() {
+      document.getElementById("greeting").textContent = "Loading greeting from backend…";
+      fetch("${BACKEND_URL}/api/greeting")
+        .then(r => r.json())
+        .then(d => { document.getElementById("greeting").textContent =
+          d.greeting + "  (new-greeting flag: " + d.flag_new_greeting + ")"; })
+        .catch(() => { document.getElementById("greeting").textContent = "backend unavailable"; });
+    }
+    loadGreeting();
+    document.getElementById("refresh").addEventListener("click", loadGreeting);
+  </script>
+</body></html>`);
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`demo-frontend on :${port}`));
+EOF
+  git add frontend/server.mjs
+  git diff --cached --quiet || git commit -m "Add a refresh button for the greeting"
+  git push -u --force origin "$LEARNER_BRANCH"
+  gh pr create --repo "$AF_REPO" --base main --head "$LEARNER_BRANCH" \
+    --title "Add a refresh button for the greeting" \
+    --body "Adds a Refresh greeting button so visitors can re-fetch the greeting from the backend without reloading the page." >/dev/null
+  LEARNER_PR="$(pr_number_for_branch "$LEARNER_BRANCH")"
+fi
+echo "learner PR: #${LEARNER_PR}"
+
+###################
+# 3. Prefixed flag + metrics
+###################
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  "${API}/flags/${LD_PROJECT_KEY}/${FLAG_KEY}" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}")
+if [ "$STATUS" != "200" ]; then
+  curl -fsS -X POST "${API}/flags/${LD_PROJECT_KEY}" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data-raw "$(jq -n --arg key "$FLAG_KEY" '{
+      key: $key,
+      name: "enable-refresh-greeting",
+      description: "Refresh greeting button on the demo page (AutoFactory solve script, shift 2).",
+      temporary: true,
+      tags: ["auto-factory", "auto-generated"],
+      variations: [
+        { value: "control", name: "Control", description: "Existing behavior — served while the flag is off (safe default)." },
+        { value: "v1", name: "v1", description: "Show the Refresh greeting button." }
+      ],
+      defaults: { onVariation: 1, offVariation: 0 },
+      clientSideAvailability: { usingEnvironmentId: true, usingMobileKey: false }
+    }')" >/dev/null
+fi
+echo "flag: ${FLAG_KEY}"
+
+create_metric() {
+  local status
+  status=$(curl -s -o /dev/null -w '%{http_code}' \
+    "${API}/metrics/${LD_PROJECT_KEY}/$1" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}")
+  if [ "$status" != "200" ]; then
+    curl -fsS -X POST "${API}/metrics/${LD_PROJECT_KEY}" \
+      -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data-raw "$2" >/dev/null
+  fi
+}
+
+create_metric "$METRIC_ERR" "$(jq -n --arg key "$METRIC_ERR" --arg flag "$FLAG_KEY" '{
+  key: $key,
+  name: $key,
+  description: "Errors when refreshing the greeting. Lower is better.",
+  kind: "custom",
+  eventKey: $key,
+  isNumeric: false,
+  successCriteria: "LowerThanBaseline",
+  randomizationUnits: ["user"],
+  tags: ["auto-factory", "auto-generated", ("flag-" + $flag)]
+}')"
+
+create_metric "$METRIC_BIZ" "$(jq -n --arg key "$METRIC_BIZ" --arg flag "$FLAG_KEY" '{
+  key: $key,
+  name: $key,
+  description: "Greeting refreshes completed. Higher is better.",
+  kind: "custom",
+  eventKey: $key,
+  isNumeric: false,
+  successCriteria: "HigherThanBaseline",
+  randomizationUnits: ["user"],
+  tags: ["auto-factory", "auto-generated", ("flag-" + $flag)]
+}')"
+echo "metrics: ${METRIC_ERR}, ${METRIC_BIZ}"
+
+###################
+# 4. Second automation-style PR with the manifest
+###################
+AGENT_PR="$(pr_number_for_branch "$AGENT_BRANCH")"
+if [ -z "$AGENT_PR" ]; then
+  git checkout -B "$AGENT_BRANCH" "origin/${LEARNER_BRANCH}"
+  mkdir -p .release-flags
+  jq -n --arg flag "$FLAG_KEY" --arg err "$METRIC_ERR" --arg biz "$METRIC_BIZ" '{
+    schemaVersion: "1.2",
+    flagKey: $flag,
+    targetVariation: "v1",
+    releasePlan: { metricKeys: [$err, $biz], randomizationUnit: "user" },
+    releaseIntent: {}
+  }' > "$MANIFEST"
+  git add "$MANIFEST"
+  git diff --cached --quiet || git -c user.email="workshops@launchdarkly.com" -c user.name="AutoFactory Solve" \
+    commit -m "feat(auto-factory): wire ${LEARNER_BRANCH} behind ${FLAG_KEY}"
+  git push -u --force origin "$AGENT_BRANCH"
+  gh pr create --repo "$AF_REPO" --base main --head "$AGENT_BRANCH" \
+    --title "AutoFactory: flag ${FLAG_KEY} for ${LEARNER_BRANCH}" \
+    --body "Release manifest for \`${FLAG_KEY}\` (solve script stand-in for the cloud agent's pull request)." >/dev/null
+  AGENT_PR="$(pr_number_for_branch "$AGENT_BRANCH")"
+fi
+echo "agent PR: #${AGENT_PR}"
+git checkout main >/dev/null 2>&1 || true
+
+###################
+# 5. Progress comments + verdict
+###################
+if ! gh api "repos/${AF_REPO}/issues/${LEARNER_PR}/comments" --paginate -q '.[].body' | grep -q 'review_approved'; then
+  phase_comment() {
+    gh pr comment "$LEARNER_PR" --repo "$AF_REPO" --body-file - <<EOF
+AutoFactory phase **$1** complete.
+
+\`\`\`json
+{ "autofactory_phase": "$1", "status": "complete", "artifacts": $2 }
+\`\`\`
+EOF
+  }
+  phase_comment research '[]'
+  phase_comment flag "[\"${FLAG_KEY}\"]"
+  phase_comment metrics "[\"${METRIC_ERR}\", \"${METRIC_BIZ}\"]"
+  phase_comment tests '[]'
+  phase_comment review '[]'
+
+  gh pr comment "$LEARNER_PR" --repo "$AF_REPO" --body-file - <<EOF
+AutoFactory Phase 1 finished (solve script stand-in for the cloud agent).
+
+- Flag action: **create**, target variation **v1**
+- Flag: \`${FLAG_KEY}\` — https://app.launchdarkly.com/${LD_PROJECT_KEY}/~/features/${FLAG_KEY}
+- Metrics: \`${METRIC_ERR}\` — https://app.launchdarkly.com/${LD_PROJECT_KEY}/metrics/${METRIC_ERR}/details, \`${METRIC_BIZ}\` — https://app.launchdarkly.com/${LD_PROJECT_KEY}/metrics/${METRIC_BIZ}/details
+- Manifest: \`${MANIFEST}\` (pull request #${AGENT_PR})
+
+\`\`\`json
+{ "review_approved": true, "risk_level": "low" }
+\`\`\`
+EOF
+fi
+
+exit 0

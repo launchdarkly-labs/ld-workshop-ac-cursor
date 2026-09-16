@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# Orientation challenge: this checks that track setup finished seeding the
+# LaunchDarkly project, not learner work. If the two chain configs the line
+# depends on are missing, nothing downstream can run.
+
+LD_PROJECT_KEY="${LD_PROJECT_KEY:-$(agent variable get projectkey 2>/dev/null)}"
+API="https://app.launchdarkly.com/api/v2"
+
+for KEY in autofactory-flag-implementer autofactory-metrics-author; do
+  CONFIG=$(curl -s -X GET \
+    "${API}/projects/${LD_PROJECT_KEY}/ai-configs/${KEY}" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+    -H "LD-API-Version: beta" | sed 's/\\/\\\\/g')
+
+  if [ "$(echo "$CONFIG" | jq -r '.key // "null"')" != "$KEY" ]; then
+    fail-message "The AI config **${KEY}** is missing from project **${LD_PROJECT_KEY}**. The project did not finish provisioning when the lab started. Restart the lab so setup can seed the agent configs again."
+    exit 1
+  fi
+done
+
+exit 0

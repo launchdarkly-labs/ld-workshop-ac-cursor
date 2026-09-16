@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# Three assertions, in the order the line produces them:
+#   1. The learner's pull request exists (open or merged).
+#   2. The automation's own pull request exists: a PR whose changed files
+#      include a path under .release-flags/. That is the same loop-guard rule
+#      the Automation prompt and the Factory Floor use to tell the two apart.
+#   3. The learner's pull request carries a comment with the review verdict.
+#
+# The flag itself is asserted in challenge 04, so a failure here points at the
+# pull-request half and a failure there points at the LaunchDarkly half.
+#
+# Closed-but-unmerged PRs are ignored: setup closes the previous session's PRs
+# but they stay in the repo's history.
+
+AF_REPO="${AF_REPO:-$(agent variable get af_repo 2>/dev/null)}"
+LEARNER_BRANCH="shift-1-backend-status"
+
+PR_NUMBERS=$(gh pr list --repo "$AF_REPO" --state all --limit 50 --json number,state \
+  -q '.[] | select(.state == "OPEN" or .state == "MERGED") | .number')
+
+if [ -z "$PR_NUMBERS" ]; then
+  fail-message "No open pull request found on **${AF_REPO}**. Follow **Make the change** in the assignment: the block ends with \`gh pr create\`, which opens the pull request that starts the line."
+  exit 1
+fi
+
+LEARNER_PRS=""
+AGENT_PRS=""
+for N in $PR_NUMBERS; do
+  if gh pr diff "$N" --repo "$AF_REPO" --name-only 2>/dev/null | grep -q '^\.release-flags/'; then
+    AGENT_PRS="$AGENT_PRS $N"
+  else
+    LEARNER_PRS="$LEARNER_PRS $N"
+  fi
+done
+
+if [ -z "$LEARNER_PRS" ]; then
+  fail-message "Every open pull request on **${AF_REPO}** carries a \`.release-flags/\` manifest, so none of them is yours. Follow **Make the change**: your branch is \`${LEARNER_BRANCH}\` and it must not touch \`.release-flags/\`."
+  exit 1
+fi
+
+if [ -z "$AGENT_PRS" ]; then
+  fail-message "Your pull request exists, but the line has not opened its own yet. The automation's pull request is the one whose changes include a \`.release-flags/\` manifest. Two possibilities: the chain is still running (watch the **Factory Floor**), or the research planner decided no flag was needed and took the side door. In that second case there is a single comment on your pull request saying so and no second pull request will appear. See **If the line takes the side door** in the assignment."
+  exit 1
+fi
+
+for N in $LEARNER_PRS; do
+  if gh api "repos/${AF_REPO}/issues/${N}/comments" --paginate -q '.[].body' 2>/dev/null | grep -q 'review_approved'; then
+    exit 0
+  fi
+done
+
+fail-message "Both pull requests exist, but your pull request has no comment carrying the \`review_approved\` verdict yet. The code reviewer posts it last, when **Quality Inspection** lifts. Give the line a minute and check the comments on your pull request under **The second pull request**."
+exit 1

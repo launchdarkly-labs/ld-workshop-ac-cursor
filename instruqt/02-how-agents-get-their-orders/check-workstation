@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# The learner only reads in this challenge, so the check guards the one thing
+# that has to be true before challenge 03 fires a cloud agent: the bootstrap
+# rule names this sandbox's LaunchDarkly project and none of the shipped
+# defaults. A failed sed in track setup would otherwise send the agent to the
+# wrong project and fail silently one challenge later.
+
+LD_PROJECT_KEY="${LD_PROJECT_KEY:-$(agent variable get projectkey 2>/dev/null)}"
+RULE=/opt/ld/autofactory-app/.cursor/rules/autofactory.mdc
+
+if [ ! -f "$RULE" ]; then
+  fail-message "The bootstrap rule is missing at \`$RULE\`. The repo did not clone during setup. Restart the lab."
+  exit 1
+fi
+
+if ! grep -q "$LD_PROJECT_KEY" "$RULE"; then
+  fail-message "The bootstrap rule does not name this lab's project key (**${LD_PROJECT_KEY}**). Setup's rewrite did not land, and the agent would target the wrong project. Restart the lab."
+  exit 1
+fi
+
+if grep -q 'auto-factory-prototype' "$RULE" || grep -q 'autofactory-demo' "$RULE"; then
+  fail-message "The bootstrap rule still contains one of AutoFactory's default project keys (\`auto-factory-prototype\` or \`autofactory-demo\`). Setup's rewrite was incomplete. Restart the lab."
+  exit 1
+fi
+
+exit 0

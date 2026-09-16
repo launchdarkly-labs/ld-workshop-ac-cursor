@@ -1,0 +1,46 @@
+slug: ld-autofactory-cursor
+title: Run an Agent Factory with Cursor and AgentControl
+teaser: Open one pull request and watch a chain of Cursor cloud agents flag it, instrument
+  it, test it, and review it. Their instructions live in LaunchDarkly, not in the repo.
+description: |-
+  You are the floor supervisor of a software factory. Raw pull
+  requests come in one end. A chain of Cursor cloud agents works
+  them: deciding whether the change needs a feature flag, creating
+  it dark, instrumenting it with metrics, writing flag-on and
+  flag-off tests, and inspecting the result. Flagged, tested,
+  measurable code comes out the other end.
+
+  The agents' instructions are not in the repo. They live in
+  LaunchDarkly AgentControl as AI configs, and every agent fetches
+  its orders at the moment its phase begins. In this lab you'll read
+  those instructions and the agent graph that connects them, open a
+  pull request against a demo app, and watch the line run on a
+  side-scrolling factory floor as each gate lifts. Then you'll
+  retool the factory by editing one agent's instructions in
+  LaunchDarkly, run the line again, and see different output with
+  no code deployed and nothing restarted.
+icon: https://launchdarkly.com/favicon-dark-mode.png
+tags:
+- cursor
+- ai
+- agentcontrol
+- mcp
+- feature-flags
+owner: launchdarkly
+developers:
+- kcochran@launchdarkly.com
+show_timer: true
+idle_timeout: 1200
+timelimit: 7200
+lab_config:
+  sidebar_enabled: true
+  feedback_recap_enabled: true
+  feedback_tab_enabled: false
+  loadingMessages: true
+  theme:
+    name: modern-dark
+  override_challenge_layout: false
+  hideStopButton: false
+  default_layout: AssignmentRight
+  default_layout_sidebar_size: 25
+enhanced_loading: false

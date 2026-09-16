@@ -1,0 +1,232 @@
+#!/bin/bash
+#
+# Skip path for challenge 03. The solve script cannot drive Cursor's cloud
+# agents, so it produces the same artifacts the chain would by hand:
+#
+#   1. the learner's pull request (if it does not exist yet)
+#   2. a string multivariate flag, created dark, in the sandbox project
+#   3. an error metric and a latency metric for that flag
+#   4. a second pull request from a branch carrying a .release-flags/ manifest
+#   5. per-phase status comments plus the review verdict on the learner's PR,
+#      so the Factory Floor replays to `complete`
+#
+# Request shapes: the flag body mirrors AutoFactory's create_flag tool
+# (string multivariate, control + v1, defaults on=1/off=0, temporary, tagged)
+# and the metric body mirrors its create_metric tool (kind=custom, eventKey,
+# isNumeric, successCriteria, randomizationUnits; numeric metrics add unit +
+# unitAggregationType). Both are the same POSTs the reference tracks make.
+
+set -eu
+
+LD_PROJECT_KEY="${LD_PROJECT_KEY:-$(agent variable get projectkey 2>/dev/null)}"
+AF_REPO="${AF_REPO:-$(agent variable get af_repo 2>/dev/null)}"
+API="https://app.launchdarkly.com/api/v2"
+WORK=/opt/ld/autofactory-app
+
+LEARNER_BRANCH="shift-1-backend-status"
+AGENT_BRANCH="autofactory/${LEARNER_BRANCH}"
+FLAG_KEY="enable-backend-status"
+METRIC_ERR="${FLAG_KEY}-error-rate"
+METRIC_LAT="${FLAG_KEY}-latency"
+MANIFEST=".release-flags/${LEARNER_BRANCH}.json"
+
+cd "$WORK"
+git fetch origin --prune
+
+pr_number_for_branch() {
+  gh pr list --repo "$AF_REPO" --state all --head "$1" --json number,state \
+    -q '[.[] | select(.state == "OPEN" or .state == "MERGED")][0].number // empty'
+}
+
+###################
+# 1. Learner PR
+###################
+LEARNER_PR="$(pr_number_for_branch "$LEARNER_BRANCH")"
+if [ -z "$LEARNER_PR" ]; then
+  git checkout -B "$LEARNER_BRANCH" origin/main
+  cat > frontend/server.mjs <<'EOF'
+/**
+ * Demo frontend (Node / Express). Serves a tiny page and the status contract.
+ *   GET /api/status -> { service, version }   (version = deployed SHA)
+ *   GET /          -> a page that fetches the backend greeting
+ *
+ * The page variant could be gated by a frontend flag; kept minimal here.
+ */
+
+import express from "express";
+
+const SHA = process.env.RAILWAY_GIT_COMMIT_SHA || "dev";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
+const app = express();
+
+app.get("/api/status", (_req, res) => {
+  res.json({ service: "demo-frontend", version: SHA });
+});
+
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"><title>Auto-Factory Demo</title></head>
+<body style="font-family:system-ui;max-width:40rem;margin:4rem auto">
+  <h1>LaunchDarkly Auto-Factory — Demo</h1>
+  <p>Frontend deployed SHA: <code>${SHA}</code></p>
+  <p id="greeting">Loading greeting from backend…</p>
+  <p id="backend-status">Checking backend status…</p>
+  <script>
+    fetch("${BACKEND_URL}/api/greeting")
+      .then(r => r.json())
+      .then(d => { document.getElementById("greeting").textContent =
+        d.greeting + "  (new-greeting flag: " + d.flag_new_greeting + ")"; })
+      .catch(() => { document.getElementById("greeting").textContent = "backend unavailable"; });
+    fetch("${BACKEND_URL}/api/status")
+      .then(r => r.json())
+      .then(d => { document.getElementById("backend-status").textContent =
+        "Backend online: " + d.service + " version " + d.version; })
+      .catch(() => { document.getElementById("backend-status").textContent = "Backend offline"; });
+  </script>
+</body></html>`);
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`demo-frontend on :${port}`));
+EOF
+  git add frontend/server.mjs
+  git diff --cached --quiet || git commit -m "Show backend status on the demo page"
+  git push -u --force origin "$LEARNER_BRANCH"
+  gh pr create --repo "$AF_REPO" --base main --head "$LEARNER_BRANCH" \
+    --title "Show backend status on the demo page" \
+    --body "Adds a live backend status line under the greeting so visitors can see whether the API is reachable and which version is deployed." >/dev/null
+  LEARNER_PR="$(pr_number_for_branch "$LEARNER_BRANCH")"
+fi
+echo "learner PR: #${LEARNER_PR}"
+
+###################
+# 2. Flag (created dark: new flags are off in every environment)
+###################
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  "${API}/flags/${LD_PROJECT_KEY}/${FLAG_KEY}" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}")
+if [ "$STATUS" != "200" ]; then
+  curl -fsS -X POST "${API}/flags/${LD_PROJECT_KEY}" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data-raw "$(jq -n --arg key "$FLAG_KEY" '{
+      key: $key,
+      name: $key,
+      description: "Backend status line on the demo page (AutoFactory solve script).",
+      temporary: true,
+      tags: ["auto-factory", "auto-generated"],
+      variations: [
+        { value: "control", name: "Control", description: "Existing behavior — served while the flag is off (safe default)." },
+        { value: "v1", name: "v1", description: "Show the live backend status line." }
+      ],
+      defaults: { onVariation: 1, offVariation: 0 },
+      clientSideAvailability: { usingEnvironmentId: true, usingMobileKey: false }
+    }')" >/dev/null
+fi
+echo "flag: ${FLAG_KEY}"
+
+###################
+# 3. Metrics
+###################
+create_metric() {
+  # $1 key, $2 body json
+  local status
+  status=$(curl -s -o /dev/null -w '%{http_code}' \
+    "${API}/metrics/${LD_PROJECT_KEY}/$1" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}")
+  if [ "$status" != "200" ]; then
+    curl -fsS -X POST "${API}/metrics/${LD_PROJECT_KEY}" \
+      -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data-raw "$2" >/dev/null
+  fi
+}
+
+create_metric "$METRIC_ERR" "$(jq -n --arg key "$METRIC_ERR" --arg flag "$FLAG_KEY" '{
+  key: $key,
+  name: $key,
+  description: "Errors rendering the backend status line. Lower is better.",
+  kind: "custom",
+  eventKey: $key,
+  isNumeric: false,
+  successCriteria: "LowerThanBaseline",
+  randomizationUnits: ["user"],
+  tags: ["auto-factory", "auto-generated", ("flag-" + $flag)]
+}')"
+
+create_metric "$METRIC_LAT" "$(jq -n --arg key "$METRIC_LAT" --arg flag "$FLAG_KEY" '{
+  key: $key,
+  name: $key,
+  description: "Time to fetch and render the backend status line. Lower is better.",
+  kind: "custom",
+  eventKey: $key,
+  isNumeric: true,
+  unit: "ms",
+  unitAggregationType: "average",
+  successCriteria: "LowerThanBaseline",
+  randomizationUnits: ["user"],
+  tags: ["auto-factory", "auto-generated", ("flag-" + $flag)]
+}')"
+echo "metrics: ${METRIC_ERR}, ${METRIC_LAT}"
+
+###################
+# 4. Agent PR carrying the manifest
+###################
+AGENT_PR="$(pr_number_for_branch "$AGENT_BRANCH")"
+if [ -z "$AGENT_PR" ]; then
+  git checkout -B "$AGENT_BRANCH" "origin/${LEARNER_BRANCH}"
+  mkdir -p .release-flags
+  jq -n --arg flag "$FLAG_KEY" --arg err "$METRIC_ERR" --arg lat "$METRIC_LAT" '{
+    schemaVersion: "1.2",
+    flagKey: $flag,
+    targetVariation: "v1",
+    releasePlan: { metricKeys: [$err, $lat], randomizationUnit: "user" },
+    releaseIntent: {}
+  }' > "$MANIFEST"
+  git add "$MANIFEST"
+  git diff --cached --quiet || git -c user.email="workshops@launchdarkly.com" -c user.name="AutoFactory Solve" \
+    commit -m "feat(auto-factory): wire ${LEARNER_BRANCH} behind ${FLAG_KEY}"
+  git push -u --force origin "$AGENT_BRANCH"
+  gh pr create --repo "$AF_REPO" --base main --head "$AGENT_BRANCH" \
+    --title "AutoFactory: flag ${FLAG_KEY} for ${LEARNER_BRANCH}" \
+    --body "Release manifest for \`${FLAG_KEY}\` (solve script stand-in for the cloud agent's pull request)." >/dev/null
+  AGENT_PR="$(pr_number_for_branch "$AGENT_BRANCH")"
+fi
+echo "agent PR: #${AGENT_PR}"
+git checkout main >/dev/null 2>&1 || true
+
+###################
+# 5. Progress comments + verdict on the learner PR
+###################
+if ! gh api "repos/${AF_REPO}/issues/${LEARNER_PR}/comments" --paginate -q '.[].body' | grep -q 'review_approved'; then
+  phase_comment() {
+    # $1 phase, $2 artifacts json array
+    gh pr comment "$LEARNER_PR" --repo "$AF_REPO" --body-file - <<EOF
+AutoFactory phase **$1** complete.
+
+\`\`\`json
+{ "autofactory_phase": "$1", "status": "complete", "artifacts": $2 }
+\`\`\`
+EOF
+  }
+  phase_comment research '[]'
+  phase_comment flag "[\"${FLAG_KEY}\"]"
+  phase_comment metrics "[\"${METRIC_ERR}\", \"${METRIC_LAT}\"]"
+  phase_comment tests '[]'
+  phase_comment review '[]'
+
+  gh pr comment "$LEARNER_PR" --repo "$AF_REPO" --body-file - <<EOF
+AutoFactory Phase 1 finished (solve script stand-in for the cloud agent).
+
+- Flag action: **create**, target variation **v1**
+- Flag: \`${FLAG_KEY}\` — https://app.launchdarkly.com/${LD_PROJECT_KEY}/~/features/${FLAG_KEY}
+- Metrics: \`${METRIC_ERR}\` — https://app.launchdarkly.com/${LD_PROJECT_KEY}/metrics/${METRIC_ERR}/details, \`${METRIC_LAT}\` — https://app.launchdarkly.com/${LD_PROJECT_KEY}/metrics/${METRIC_LAT}/details
+- Manifest: \`${MANIFEST}\` (pull request #${AGENT_PR})
+
+\`\`\`json
+{ "review_approved": true, "risk_level": "low" }
+\`\`\`
+EOF
+fi
+
+exit 0

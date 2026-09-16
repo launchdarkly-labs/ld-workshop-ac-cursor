@@ -1,0 +1,3 @@
+#!/bin/sh
+# Track setup did the work: repo reset, project seeded, game started.
+exit 0

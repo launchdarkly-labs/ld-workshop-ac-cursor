@@ -1,0 +1,168 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+echo "Running setup-workstation script from $SCRIPT_DIR"
+
+until [ -f /opt/instruqt/bootstrap/host-bootstrap-completed ]; do
+    echo "Waiting for instruqt bootstrap to complete"
+    sleep 1
+done
+
+###################
+# Check out a GitHub pool user
+###################
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+python3 -c 'import boto3' 2>/dev/null || pip install --quiet boto3
+# PYTHONPATH so pool.py can `import gh_auth` from the same lib dir.
+POOL_BUNDLE="$(PYTHONPATH="/opt/ld/util" python3 "/opt/ld/util/pool.py" checkout)"
+GH_USER="$(echo "$POOL_BUNDLE" | jq -r .username)"
+GH_PASS="$(echo "$POOL_BUNDLE" | jq -r .password)"
+GH_TOKEN="$(echo "$POOL_BUNDLE" | jq -r .github_token)"
+
+# Expose username + password to assignment markdown via Instruqt-Var.
+# The password is needed for the manual GitHub web-UI login in Challenge 2.
+agent variable set gh_user "$GH_USER"
+agent variable set gh_pass "$GH_PASS"
+echo "export GH_USER=\"$GH_USER\"" >> ~/.profile
+echo "export GH_USER=\"$GH_USER\"" >> ~/.bashrc
+
+# Wire the GitHub App access token into both gh and copilot CLIs.
+# `copilot` CLI checks COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN.
+echo "$GH_TOKEN" | gh auth login --with-token >/dev/null 2>&1 || true
+
+# Install gh-totp so learners can regenerate the 2FA code at any moment.
+# The gh_totp Instruqt-Var itself is refreshed by 02-configure-mcp-server's
+# per-challenge setup-workstation, so it's freshly minted when the learner
+# actually needs it.
+cat > /usr/local/bin/gh-totp <<WRAP
+#!/usr/bin/env bash
+exec env PYTHONPATH=/opt/ld/util python3 -m totp current "$GH_USER"
+WRAP
+chmod +x /usr/local/bin/gh-totp
+{
+    echo "export GITHUB_TOKEN=\"$GH_TOKEN\""
+    echo "export GH_TOKEN=\"$GH_TOKEN\""
+} >> ~/.profile
+{
+    echo "export GITHUB_TOKEN=\"$GH_TOKEN\""
+    echo "export GH_TOKEN=\"$GH_TOKEN\""
+} >> ~/.bashrc
+export GITHUB_TOKEN="$GH_TOKEN"
+export GH_TOKEN="$GH_TOKEN"
+
+cd /opt/ld/terraform-ld-student
+echo "sandbox_id = \"${_SANDBOX_ID}\"" > terraform.tfvars
+terraform apply -auto-approve
+export LD_PROJECT_KEY="$(terraform output -json | jq -r '.students.value[0].project_key')"
+echo "" >> ~/.profile
+echo "export LD_PROJECT_KEY=\"$LD_PROJECT_KEY\"" >> ~/.profile
+echo "" >> ~/.bashrc
+echo "export LD_PROJECT_KEY=\"$LD_PROJECT_KEY\"" >> ~/.bashrc
+
+agent variable set projectkey "${LD_PROJECT_KEY}"
+
+export LD_CLIENT_KEY=$(curl -s -X GET \
+  'https://app.launchdarkly.com/api/v2/projects/'${LD_PROJECT_KEY}'/environments/test' \
+  -H 'Authorization: '${LAUNCHDARKLY_ACCESS_TOKEN}'' | jq -r ._id)
+echo "export LD_CLIENT_KEY=${LD_CLIENT_KEY}" >> ~/.profile
+echo "export LD_CLIENT_KEY=${LD_CLIENT_KEY}" >> ~/.bashrc
+echo "LD_CLIENT_KEY=${LD_CLIENT_KEY}" >> /opt/python/ld-sample-app-python/.env
+export LD_SDK_KEY=$(curl -s -X GET \
+  'https://app.launchdarkly.com/api/v2/projects/'${LD_PROJECT_KEY}'/environments/test' \
+  -H 'Authorization: '${LAUNCHDARKLY_ACCESS_TOKEN}'' | jq -r .apiKey)
+echo "export LD_SDK_KEY=${LD_SDK_KEY}" >> ~/.profile
+echo "export LD_SDK_KEY=${LD_SDK_KEY}" >> ~/.bashrc
+echo "LD_SDK_KEY=${LD_SDK_KEY}" >> /opt/python/ld-sample-app-python/.env
+
+curl -X POST https://app.launchdarkly.com/api/v2/flags/${LD_PROJECT_KEY} \
+     -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+     -H "Content-Type: application/json" \
+     -d '{
+  "name": "Coffee Promo 1",
+  "key": "coffee-promo-1",
+  "clientSideAvailability": {
+    "usingEnvironmentId": true,
+    "usingMobileKey": true
+  }
+}'
+
+USERID=$(echo "$GH_USER" | sed 's/[^0-9]//g')
+
+git config --global user.email "workshops+instruqtuser${USERID}@launchdarkly.com"
+git config --global user.name "$GH_USER"
+ssh-keygen -q -t ed25519 -N "" -C "workshops+instruqtuser${USERID}@launchdarkly.com" -f /root/.ssh/id_ed25519
+export GIT_SSH_KEY=$(cat /root/.ssh/id_ed25519.pub)
+agent variable set git_ssh_key "$GIT_SSH_KEY"
+
+###################
+# AutoFactory: assign an org repo, seed the LD project, start the game
+###################
+
+# Pool usernames end in a two-digit index (launchdarkly-user-07). The app repos
+# are named to match, one per pool user, so assignment needs no extra state.
+# Strip leading zeros before printf: bash reads "08" as octal and errors.
+POOL_IDX="$(echo "$GH_USER" | grep -oE '[0-9]+$')"
+POOL_IDX=$((10#$POOL_IDX))
+AF_REPO="launchdarkly-training/autofactory-$(printf '%02d' "$POOL_IDX")"
+echo "export AF_REPO=\"$AF_REPO\"" >> ~/.bashrc
+echo "export AF_REPO=\"$AF_REPO\"" >> ~/.profile
+export AF_REPO
+agent variable set af_repo "$AF_REPO"
+
+# Reset the repo to its pristine tag. Force-push is deliberate: the previous
+# session's agent branches and commits go away. The `pristine` tag is created
+# once, by hand, at repo provisioning time (see manual-setup.md).
+WORK=/opt/ld/autofactory-app
+rm -rf "$WORK"
+git clone "https://x-access-token:${GH_TOKEN}@github.com/${AF_REPO}.git" "$WORK"
+cd "$WORK"
+git checkout -B main refs/tags/pristine
+git push --force origin main
+
+# Close anything the last session left open, in case its cleanup did not run.
+gh pr list --repo "$AF_REPO" --state open --json number -q '.[].number' \
+  | xargs -r -I {} gh pr close {} --repo "$AF_REPO" --delete-branch || true
+
+# Point the agents at this sandbox's LaunchDarkly project. The cloud agent reads
+# project keys from this rule file, not from its MCP token, which is shared.
+# The shipped rule names two projects (factory `auto-factory-prototype`, app
+# `autofactory-demo`) in the prerequisites list and in the output link
+# templates; this track collapses both into the one sandbox project.
+RULE="$WORK/.cursor/rules/autofactory.mdc"
+sed -i "s/auto-factory-prototype/${LD_PROJECT_KEY}/g" "$RULE"
+sed -i "s/autofactory-demo/${LD_PROJECT_KEY}/g" "$RULE"
+if grep -q 'auto-factory-prototype\|autofactory-demo' "$RULE"; then
+  echo "autofactory.mdc still names a default project key after rewrite; aborting so the agent cannot target the wrong project"
+  exit 1
+fi
+git -C "$WORK" add .cursor/rules/autofactory.mdc
+git -C "$WORK" diff --cached --quiet || git -C "$WORK" \
+  -c user.email="workshops@launchdarkly.com" -c user.name="AutoFactory Setup" \
+  commit -m "Point AutoFactory at this session's LaunchDarkly project"
+git -C "$WORK" push origin main
+
+# Seed the project with the agent configs, judge configs, graph, and operational
+# flags. `bridge provision` is idempotent and REST-only. It exits 1 if any single
+# resource fails (including ones this track never uses, such as the OpenAI
+# provider variations), so do not let that abort the whole lab: challenge 01's
+# check verifies the two configs the chain actually needs.
+cd /opt/ld/auto-factory
+LD_API_KEY="${LAUNCHDARKLY_ACCESS_TOKEN}" \
+LD_PROJECT_KEY="${LD_PROJECT_KEY}" \
+LD_BASE_URL="https://app.launchdarkly.com" \
+  npm run bridge -- provision \
+  || echo "bridge provision reported failures; continuing (challenge 01 check validates the agent configs)"
+
+# Start the game with this session's context.
+GAME_ENV=/opt/ld/factory-floor/.env
+{
+  echo "AF_REPO=${AF_REPO}"
+  echo "GITHUB_TOKEN=${GH_TOKEN}"
+  echo "LD_PROJECT_KEY=${LD_PROJECT_KEY}"
+  echo "PORT=7777"
+} > "$GAME_ENV"
+# stop + start, not restart: restart sends SIGHUP and the new env is not reloaded.
+service factory-floor stop || true
+service factory-floor start

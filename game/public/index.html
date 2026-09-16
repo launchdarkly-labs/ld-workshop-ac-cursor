@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Factory Floor</title>
+  <link rel="stylesheet" href="/floor.css">
+</head>
+<body>
+  <header id="strip">
+    <span class="cell" id="repo" title="assigned repository">—</span>
+    <span class="cell" id="pr">no pull request yet</span>
+    <span class="cell" id="elapsed">00:00</span>
+    <span class="cell grow" id="phase">line idle</span>
+    <span class="cell" id="runstate" data-state="idle">idle</span>
+  </header>
+
+  <div id="banner" hidden></div>
+
+  <main id="stage">
+    <canvas id="floor" width="960" height="420"></canvas>
+    <div id="overlay"></div>
+  </main>
+
+  <section id="placard" hidden></section>
+  <footer id="hint"></footer>
+
+  <script src="/floor.js"></script>
+</body>
+</html>

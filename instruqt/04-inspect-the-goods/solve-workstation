@@ -1,0 +1,4 @@
+#!/bin/sh
+# Challenge 03's solve created the flag, metrics, manifest PR, and verdict
+# comment. There is nothing for the learner to do here but read.
+exit 0

@@ -1,0 +1,36 @@
+#!/bin/bash
+
+SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+
+cd /opt/ld/terraform-ld-student
+terraform destroy -auto-approve || true
+
+# get the personal acces token
+GITHUB_TOKEN=$(python3 /opt/ld/util/pat.py current "$GH_USER")
+GH_TOKEN="$GITHUB_TOKEN"
+# Delete all github repos and SSH keys
+echo "Deleting all GitHub repos for user $GH_USER"
+gh repo list --limit 1000 --json nameWithOwner -q '.[].nameWithOwner' \
+  | xargs -I {} gh repo delete {} --yes
+
+echo "Deleting all GitHub SSH keys for user $GH_USER"
+gh api /user/keys --jq '.[].id' | xargs -I {} gh api -X DELETE /user/keys/{}
+
+# The LD project for this session is destroyed by terraform above, so any
+# residual MCP entry in the pool user's Copilot settings points at a dead
+# API token. The next learner overwrites it in Challenge 2.
+
+# Release the GitHub pool user. Best-effort: the TTL sweeper is the safety
+# net if this fails (e.g. AWS creds expired mid-session).
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+PYTHONPATH="/opt/ld/util" python3 "/opt/ld/util/pool.py" release \
+    || echo "pool release failed; sweeper will recover the row"
+
+###################
+# AutoFactory: tidy the org repo (best-effort; setup resets it regardless)
+###################
+AF_REPO="${AF_REPO:-$(agent variable get af_repo 2>/dev/null || true)}"
+if [ -n "${AF_REPO:-}" ]; then
+  gh pr list --repo "$AF_REPO" --state open --json number -q '.[].number' \
+    | xargs -r -I {} gh pr close {} --repo "$AF_REPO" --delete-branch || true
+fi

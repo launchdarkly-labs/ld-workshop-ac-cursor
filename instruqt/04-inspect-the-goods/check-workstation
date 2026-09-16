@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# The LaunchDarkly half of the line's output:
+#   1. At least one flag exists that the agent created. The five auto-factory-*
+#      operational flags seeded by `bridge provision` are excluded by key
+#      prefix, and so is coffee-promo-1, which the inherited track setup
+#      creates in every sandbox. If any remaining flag carries the
+#      `auto-generated` tag the agents apply, only those count.
+#   2. Every environment on each candidate flag is targeting off. Phase 1
+#      creates flags dark and leaves them that way.
+#   3. At least one metric exists beyond the two sentry-errors-* metrics that
+#      provisioning seeds.
+#
+# Tolerant on naming: the agent chooses the flag and metric keys.
+
+LD_PROJECT_KEY="${LD_PROJECT_KEY:-$(agent variable get projectkey 2>/dev/null)}"
+API="https://app.launchdarkly.com/api/v2"
+
+FLAGS=$(curl -s -X GET "${API}/flags/${LD_PROJECT_KEY}?limit=100" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" | sed 's/\\/\\\\/g')
+
+CANDIDATES=$(echo "$FLAGS" | jq -r '
+  .items[]?
+  | select((.key | startswith("auto-factory-")) | not)
+  | select(.key != "coffee-promo-1")
+  | .key')
+
+TAGGED=$(echo "$FLAGS" | jq -r '
+  .items[]?
+  | select((.key | startswith("auto-factory-")) | not)
+  | select(.key != "coffee-promo-1")
+  | select((.tags // []) | index("auto-generated"))
+  | .key')
+
+if [ -n "$TAGGED" ]; then
+  CANDIDATES="$TAGGED"
+fi
+
+if [ -z "$CANDIDATES" ]; then
+  fail-message "No agent-created flag found in project **${LD_PROJECT_KEY}**. The only flags present are the factory's own \`auto-factory-*\` settings. The Flag Press gate did not lift: check that challenge 03's second pull request exists and that its comment on your pull request names a flag key."
+  exit 1
+fi
+
+for KEY in $CANDIDATES; do
+  FLAG=$(curl -s -X GET "${API}/flags/${LD_PROJECT_KEY}/${KEY}" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" | sed 's/\\/\\\\/g')
+  ON_ENVS=$(echo "$FLAG" | jq -r '.environments | to_entries[]? | select(.value.on == true) | .key' | tr '\n' ' ')
+  if [ -n "$ON_ENVS" ]; then
+    fail-message "Flag **${KEY}** is targeting **on** in: ${ON_ENVS}. Phase 1 leaves every flag off so nothing changes for users. Open the flag's **Targeting** tab and turn it off in each environment listed."
+    exit 1
+  fi
+done
+
+METRICS=$(curl -s -X GET "${API}/metrics/${LD_PROJECT_KEY}?limit=100" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" | sed 's/\\/\\\\/g')
+
+AGENT_METRICS=$(echo "$METRICS" | jq -r '
+  .items[]?
+  | select(.key != "sentry-errors-binary" and .key != "sentry-errors-count")
+  | .key')
+
+if [ -z "$AGENT_METRICS" ]; then
+  fail-message "The flag exists but no agent-created metric does. Only the seeded \`sentry-errors-*\` metrics are present in **${LD_PROJECT_KEY}**. The Instrumentation gate did not produce its goods: check the metrics author's comment on your pull request."
+  exit 1
+fi
+
+exit 0

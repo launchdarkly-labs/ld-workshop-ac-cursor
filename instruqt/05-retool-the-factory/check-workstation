@@ -1,0 +1,78 @@
+#!/bin/sh
+#
+# Three assertions:
+#   1. HARD — the flag implementer's default variation instructions contain
+#      the `shift2-` prefix. This is the learner's actual work.
+#   2. HARD — a second learner pull request and a second automation pull
+#      request exist (same manifest rule as challenge 03's check).
+#   3. SOFT — a flag whose key starts with `shift2-` exists in the project.
+#
+# WHY ITEM 3 IS A WARNING AND MUST STAY ONE:
+#   The agent is following a natural-language instruction the learner added in
+#   LaunchDarkly. Whether it complies is exactly the property this prototype
+#   is testing (AutoFactory's own README calls fetch-and-obey reliability the
+#   open question). The learner did their job when the instruction was saved
+#   and the second run finished; the agent ignoring the instruction is a real
+#   result worth reading about in its PR comment, not something to block a
+#   learner on. Do NOT "fix" this into a hard failure. If you want it hard,
+#   you want a different lab.
+
+LD_PROJECT_KEY="${LD_PROJECT_KEY:-$(agent variable get projectkey 2>/dev/null)}"
+AF_REPO="${AF_REPO:-$(agent variable get af_repo 2>/dev/null)}"
+API="https://app.launchdarkly.com/api/v2"
+PREFIX="shift2-"
+
+# 1. Instruction edit landed.
+CONFIG=$(curl -s -X GET \
+  "${API}/projects/${LD_PROJECT_KEY}/ai-configs/autofactory-flag-implementer" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
+  -H "LD-API-Version: beta" | sed 's/\\/\\\\/g')
+
+INSTRUCTIONS=$(echo "$CONFIG" | jq -r '.variations[]? | select(.key=="default") | .instructions // ""')
+
+if [ -z "$INSTRUCTIONS" ] || [ "$INSTRUCTIONS" = "null" ]; then
+  fail-message "Could not read the **Default Configuration** variation of **autofactory-flag-implementer**. Open the config under **Agents → Configs** and confirm the variation still exists."
+  exit 1
+fi
+
+if ! echo "$INSTRUCTIONS" | grep -q "$PREFIX"; then
+  fail-message "The flag implementer's instructions do not mention the **${PREFIX}** prefix yet. Follow **Add a house rule**: append the naming-convention sentence to the **Default Configuration** variation's instructions and click **Review and save**, then **Save changes**."
+  exit 1
+fi
+
+# 2. Second run happened: two learner PRs and two automation PRs.
+PR_NUMBERS=$(gh pr list --repo "$AF_REPO" --state all --limit 50 --json number,state \
+  -q '.[] | select(.state == "OPEN" or .state == "MERGED") | .number')
+
+LEARNER_COUNT=0
+AGENT_COUNT=0
+for N in $PR_NUMBERS; do
+  if gh pr diff "$N" --repo "$AF_REPO" --name-only 2>/dev/null | grep -q '^\.release-flags/'; then
+    AGENT_COUNT=$((AGENT_COUNT + 1))
+  else
+    LEARNER_COUNT=$((LEARNER_COUNT + 1))
+  fi
+done
+
+if [ "$LEARNER_COUNT" -lt 2 ]; then
+  fail-message "Only ${LEARNER_COUNT} pull request(s) of yours found on **${AF_REPO}**. The second shift needs its own: follow **Run the line again**, which pushes \`shift-2-refresh-greeting\` and opens the pull request."
+  exit 1
+fi
+
+if [ "$AGENT_COUNT" -lt 2 ]; then
+  fail-message "Your second pull request exists, but the line has not opened its second pull request yet (the one carrying a \`.release-flags/\` manifest). Either the chain is still running, or the research planner took the side door. Watch the **Factory Floor** and read the comments on your second pull request."
+  exit 1
+fi
+
+# 3. SOFT: did the agent honour the prefix? Warn, never fail. See the header.
+FLAGS=$(curl -s -X GET "${API}/flags/${LD_PROJECT_KEY}?limit=100" \
+  -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" | sed 's/\\/\\\\/g')
+PREFIXED=$(echo "$FLAGS" | jq -r --arg p "$PREFIX" '.items[]? | select(.key | startswith($p)) | .key' | head -1)
+
+if [ -z "$PREFIXED" ]; then
+  echo "WARNING: your instruction edit is in place and the second run finished, but no flag key in ${LD_PROJECT_KEY} starts with '${PREFIX}'."
+  echo "The agent did not follow the naming convention this time. That is a real result of running a factory on natural-language instructions, not a lab fault."
+  echo "Read the flag implementer's comment on your second pull request to see what it thought the naming rule was. This check passes regardless."
+fi
+
+exit 0
