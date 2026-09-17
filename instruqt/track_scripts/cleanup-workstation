@@ -5,16 +5,28 @@ SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 cd /opt/ld/terraform-ld-student
 terraform destroy -auto-approve || true
 
-# get the personal acces token
+# get the personal access token
 GITHUB_TOKEN=$(python3 /opt/ld/util/pat.py current "$GH_USER")
 GH_TOKEN="$GITHUB_TOKEN"
-# Delete all github repos and SSH keys
-echo "Deleting all GitHub repos for user $GH_USER"
-gh repo list --limit 1000 --json nameWithOwner -q '.[].nameWithOwner' \
-  | xargs -I {} gh repo delete {} --yes
+export GITHUB_TOKEN GH_TOKEN
 
-echo "Deleting all GitHub SSH keys for user $GH_USER"
-gh api /user/keys --jq '.[].id' | xargs -I {} gh api -X DELETE /user/keys/{}
+# Reset the pool account: delete the repos and SSH keys it owns. Only after
+# proving gh is authenticated AS that pool user. Without this guard an empty
+# token makes gh fall back to whatever login is stored on the machine, and the
+# sweep would delete that account's repos instead. `gh repo list "$GH_USER"`
+# names the owner explicitly rather than relying on the implicit current user.
+GH_LOGIN="$(gh api user --jq .login 2>/dev/null || true)"
+if [ -n "${GH_USER:-}" ] && [ "$GH_LOGIN" = "$GH_USER" ] \
+   && echo "$GH_USER" | grep -qE '^launchdarkly-user-[0-9]+$'; then
+  echo "Deleting all GitHub repos owned by pool user $GH_USER"
+  gh repo list "$GH_USER" --limit 1000 --json nameWithOwner -q '.[].nameWithOwner' \
+    | xargs -r -I {} gh repo delete {} --yes
+
+  echo "Deleting all GitHub SSH keys for user $GH_USER"
+  gh api /user/keys --jq '.[].id' | xargs -r -I {} gh api -X DELETE /user/keys/{}
+else
+  echo "Refusing GitHub sweep: gh is authenticated as '${GH_LOGIN:-nobody}', expected pool user '${GH_USER:-unset}'"
+fi
 
 # The LD project for this session is destroyed by terraform above, so any
 # residual MCP entry in the pool user's Copilot settings points at a dead
