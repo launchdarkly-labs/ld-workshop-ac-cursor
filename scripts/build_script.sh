@@ -59,6 +59,9 @@ warn() { printf '\n\033[1;33m[warn] %s\033[0m\n' "$*"; }
 
 export DEBIAN_FRONTEND=noninteractive
 export GIT_TERMINAL_PROMPT=0
+# AWS CLI v2 pages output through `less` when stdout is a TTY, which looks like
+# a hang when this script is pasted into a console. Never page.
+export AWS_PAGER=""
 
 say "Updating apt"
 apt-get -y update
@@ -194,7 +197,7 @@ fi
 # terraform/aws-role has not been applied yet.
 if /opt/bin/credentials.sh 2>/tmp/credentials.err | jq -e '.Version == 1 and .AccessKeyId != null' >/dev/null 2>&1; then
     echo "federation OK: credentials.sh returned temporary AWS credentials"
-    AWS_PROFILE=BasicProfile aws sts get-caller-identity --query Arn --output text || true
+    AWS_PROFILE=BasicProfile aws sts get-caller-identity --no-cli-pager --query Arn --output text || true
 else
     warn "credentials.sh did not return credentials: $(tr '\n' ' ' < /tmp/credentials.err | cut -c1-200)"
     warn "Apply terraform/aws-role and confirm ROLE_ARN / AUDIENCE in credentials.sh before relying on federation"
