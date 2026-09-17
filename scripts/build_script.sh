@@ -3,7 +3,7 @@
 # Instruqt VM image build script — `launchdarkly/workshop-autofactory-cursor`.
 #
 # Implements image-requirements.md for the ld-autofactory-cursor track. Based on
-# image/install.sh (the ai-configs-intro build) but with a different shape: this
+# scripts/install.sh (the ai-configs-intro build) but with a different shape: this
 # image runs NO agents. It opens a pull request, watches what Cursor's cloud
 # automation sends back, and renders it. So: no Anthropic key, no Cursor key,
 # no @cursor/sdk, no Bedrock, no code-server, no ToggleWear.
@@ -13,8 +13,9 @@
 #      (the copilot-cleanup image). That base already carries the three
 #      load-bearing pieces: /opt/ld/util (pool client), /opt/ld/terraform-ld-student,
 #      and python3 + boto3 + jq. This script verifies each and only rebuilds a
-#      piece if it is missing, so it also works on a fresh Ubuntu LTS base as
-#      long as POOL_LIB_REPO_URL / TF_STUDENT_REPO_URL are reachable.
+#      piece if it is missing, so it also works on a fresh Ubuntu LTS base: the
+#      pool client is copied from this repo's scripts/ and the student
+#      Terraform is cloned from TF_STUDENT_REPO_URL.
 #   2. Edit the variables below (at minimum confirm TRACK_REPO_REF).
 #   3. Paste this entire script into the terminal as root (or run with sudo).
 #   4. When it finishes, save the running VM as `launchdarkly/workshop-autofactory-cursor`.
@@ -29,7 +30,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Edit these before pasting:
 # ---------------------------------------------------------------------------
-# This track repo: game/ is copied to /opt/ld/factory-floor.
+# This track repo: game/ is copied to /opt/ld/factory-floor, and scripts/*.py is
+# the pool client fallback for /opt/ld/util when the base image lacks it.
 TRACK_REPO_URL="https://github.com/launchdarkly-labs/ld-workshop-ac-cursor.git"
 TRACK_REPO_REF="main"
 
@@ -38,9 +40,8 @@ TRACK_REPO_REF="main"
 AUTOFACTORY_REPO_URL="https://github.com/launchdarkly-labs/launchdarkly-auto-factory.git"
 AUTOFACTORY_REF="main"
 
-# Only used when the base image is NOT image-pov-python-v2 and these are missing.
-POOL_LIB_REPO_URL="https://github.com/launchdarkly-labs/ld-workshop-gh-copilot-cleanup.git"   # lib/ -> /opt/ld/util
-TF_STUDENT_REPO_URL="https://github.com/kevincloud/terraform-ld-student.git"                    # -> /opt/ld/terraform-ld-student
+# Only used when the base image is NOT image-pov-python-v2 and the directory is missing.
+TF_STUDENT_REPO_URL="https://github.com/kevincloud/terraform-ld-student.git"   # -> /opt/ld/terraform-ld-student
 
 # AutoFactory declares engines.node >= 20 and pins .nvmrc to 20. 22.x is the
 # current LTS line and satisfies it. Node 24 is NOT needed (that belongs to the
@@ -136,14 +137,19 @@ fi
 mkdir -p /opt/ld
 SCRATCH="$(mktemp -d)"
 
+# The track repo is used twice below: scripts/*.py is the pool-client fallback
+# and game/ is the Factory Floor. Clone it once.
+say "Cloning track repo from ${TRACK_REPO_URL}@${TRACK_REPO_REF}"
+git clone --depth 1 --branch "${TRACK_REPO_REF}" "${TRACK_REPO_URL}" "${SCRATCH}/track"
+
 say "Checking /opt/ld/util (GitHub account pool client)"
 if [ -f /opt/ld/util/pool.py ] && [ -f /opt/ld/util/gh_auth.py ] && [ -f /opt/ld/util/pat.py ] && [ -f /opt/ld/util/totp.py ]; then
     echo "present: $(ls /opt/ld/util/*.py | xargs -n1 basename | tr '\n' ' ')"
 else
-    warn "/opt/ld/util is incomplete; this is not the image-pov-python-v2 base. Rebuilding from ${POOL_LIB_REPO_URL} lib/"
-    git clone --depth 1 "${POOL_LIB_REPO_URL}" "${SCRATCH}/pool-src"
+    warn "/opt/ld/util is incomplete; this is not the image-pov-python-v2 base. Installing the pool client from the track repo's scripts/"
+    for f in pool.py gh_auth.py pat.py totp.py; do test -f "${SCRATCH}/track/scripts/${f}"; done
     mkdir -p /opt/ld/util
-    cp "${SCRATCH}/pool-src/lib/"*.py /opt/ld/util/
+    cp "${SCRATCH}/track/scripts/"{pool,gh_auth,pat,totp}.py /opt/ld/util/
     chmod +x /opt/ld/util/*.py
 fi
 PYTHONPATH=/opt/ld/util python3 -c 'import pool, gh_auth, pat, totp; print("pool client imports OK")'
@@ -194,8 +200,7 @@ npm ls -g @launchdarkly/mcp-server --depth=0 | tail -1
 # The game: game/ from the track repo -> /opt/ld/factory-floor, served on 7777
 # by a `factory-floor` service that reads /opt/ld/factory-floor/.env.
 # ---------------------------------------------------------------------------
-say "Installing Factory Floor from ${TRACK_REPO_URL}@${TRACK_REPO_REF}"
-git clone --depth 1 --branch "${TRACK_REPO_REF}" "${TRACK_REPO_URL}" "${SCRATCH}/track"
+say "Installing Factory Floor from the track checkout"
 test -f "${SCRATCH}/track/game/server.mjs"
 rm -rf /opt/ld/factory-floor
 cp -R "${SCRATCH}/track/game" /opt/ld/factory-floor
