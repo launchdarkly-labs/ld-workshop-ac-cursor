@@ -1,6 +1,8 @@
 #!/bin/bash
 
 set -euo pipefail
+# Name the failing command in the Instruqt setup log instead of dying silently.
+trap 'echo "setup-workstation failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 SCRIPT_DIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 echo "Running setup-workstation script from $SCRIPT_DIR"
@@ -68,13 +70,11 @@ export LD_CLIENT_KEY=$(curl -s -X GET \
   -H 'Authorization: '${LAUNCHDARKLY_ACCESS_TOKEN}'' | jq -r ._id)
 echo "export LD_CLIENT_KEY=${LD_CLIENT_KEY}" >> ~/.profile
 echo "export LD_CLIENT_KEY=${LD_CLIENT_KEY}" >> ~/.bashrc
-echo "LD_CLIENT_KEY=${LD_CLIENT_KEY}" >> /opt/python/ld-sample-app-python/.env
 export LD_SDK_KEY=$(curl -s -X GET \
   'https://app.launchdarkly.com/api/v2/projects/'${LD_PROJECT_KEY}'/environments/test' \
   -H 'Authorization: '${LAUNCHDARKLY_ACCESS_TOKEN}'' | jq -r .apiKey)
 echo "export LD_SDK_KEY=${LD_SDK_KEY}" >> ~/.profile
 echo "export LD_SDK_KEY=${LD_SDK_KEY}" >> ~/.bashrc
-echo "LD_SDK_KEY=${LD_SDK_KEY}" >> /opt/python/ld-sample-app-python/.env
 
 curl -X POST https://app.launchdarkly.com/api/v2/flags/${LD_PROJECT_KEY} \
      -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
