@@ -133,6 +133,9 @@ else
 fi
 aws --version
 
+# The BasicProfile federation helper that uses this CLI is installed further
+# down, once the track repo has been cloned (see "GCP -> AWS federation").
+
 # ---------------------------------------------------------------------------
 # Terraform: the inherited setup runs `terraform apply` in /opt/ld/terraform-ld-student.
 # The base image has it; install only if missing.
@@ -172,6 +175,42 @@ else
     chmod +x /opt/ld/util/*.py
 fi
 PYTHONPATH=/opt/ld/util python3 -c 'import pool, gh_auth, pat, totp; print("pool client imports OK")'
+
+# ---------------------------------------------------------------------------
+# GCP -> AWS federation for the pool client. When AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY are absent from the environment, boto3 opens the
+# `BasicProfile` profile, whose credential_process is /opt/bin/credentials.sh.
+# That helper exchanges the VM's GCE identity token for the
+# InstruqtAutoFactoryCursorRole created by terraform/aws-role. It needs curl,
+# jq, and aws, all installed above.
+# ---------------------------------------------------------------------------
+say "Installing GCP -> AWS federation helper (BasicProfile)"
+test -f "${SCRATCH}/track/scripts/credentials.sh"
+mkdir -p /opt/bin
+install -m 0755 "${SCRATCH}/track/scripts/credentials.sh" /opt/bin/credentials.sh
+mkdir -p /root/.aws
+if [ -f /root/.aws/config ] && grep -q '^\[profile BasicProfile\]' /root/.aws/config; then
+    echo "BasicProfile already present in /root/.aws/config; leaving it"
+else
+    cat <<'AWSCFG' >> /root/.aws/config
+
+[profile BasicProfile]
+credential_process = /opt/bin/credentials.sh
+region = us-east-1
+AWSCFG
+    echo "BasicProfile written to /root/.aws/config"
+fi
+# Smoke test (warn-only): succeeds only on a GCE VM whose service account the
+# role trusts, with the role already applied. A failure here is expected if
+# terraform/aws-role has not been applied yet.
+if /opt/bin/credentials.sh 2>/tmp/credentials.err | jq -e '.Version == 1 and .AccessKeyId != null' >/dev/null 2>&1; then
+    echo "federation OK: credentials.sh returned temporary AWS credentials"
+    AWS_PROFILE=BasicProfile aws sts get-caller-identity --query Arn --output text || true
+else
+    warn "credentials.sh did not return credentials: $(tr '\n' ' ' < /tmp/credentials.err | cut -c1-200)"
+    warn "Apply terraform/aws-role and confirm ROLE_ARN / AUDIENCE in credentials.sh before relying on federation"
+fi
+rm -f /tmp/credentials.err
 
 say "Checking /opt/ld/terraform-ld-student (one LD project per sandbox)"
 if [ -f /opt/ld/terraform-ld-student/main.tf ]; then
@@ -329,6 +368,8 @@ printf '%-28s %s\n' "terraform"            "$(terraform version | head -1 | awk 
 printf '%-28s %s\n' "python3"              "$(python3 --version | awk '{print $2}')"
 printf '%-28s %s\n' "boto3"                "$(python3 -c 'import boto3; print(boto3.__version__)')"
 printf '%-28s %s\n' "/opt/ld/util"         "$(ls /opt/ld/util/*.py | wc -l) files"
+printf '%-28s %s\n' "/opt/bin/credentials.sh" "$( [ -x /opt/bin/credentials.sh ] && echo present || echo MISSING)"
+printf '%-28s %s\n' "BasicProfile"         "$(grep -q '^\[profile BasicProfile\]' /root/.aws/config 2>/dev/null && echo configured || echo MISSING)"
 printf '%-28s %s\n' "/opt/ld/terraform-ld-student" "$( [ -d /opt/ld/terraform-ld-student/.terraform ] && echo initialized || echo NOT initialized)"
 printf '%-28s %s\n' "/opt/ld/auto-factory" "$(git -C /opt/ld/auto-factory rev-parse --short HEAD) (node_modules: $( [ -d /opt/ld/auto-factory/node_modules ] && echo yes || echo NO))"
 printf '%-28s %s\n' "@launchdarkly/mcp-server" "$(npm ls -g @launchdarkly/mcp-server --depth=0 2>/dev/null | grep -o '@launchdarkly/mcp-server@[0-9.]*' || echo missing)"
