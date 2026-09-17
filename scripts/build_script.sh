@@ -159,6 +159,12 @@ fi
 mkdir -p /opt/ld
 SCRATCH="$(mktemp -d)"
 
+# The track repo is used three times below: scripts/credentials.sh is the
+# federation helper, scripts/*.py is the pool-client fallback, and game/ is the
+# Factory Floor. Clone it once, before anything that reads from it.
+say "Cloning track repo from ${TRACK_REPO_URL}@${TRACK_REPO_REF}"
+git clone --depth 1 --branch "${TRACK_REPO_REF}" "${TRACK_REPO_URL}" "${SCRATCH}/track"
+
 # ---------------------------------------------------------------------------
 # GCP -> AWS federation for the pool client. When AWS_ACCESS_KEY_ID /
 # AWS_SECRET_ACCESS_KEY are absent from the environment, boto3 opens the
@@ -194,11 +200,6 @@ else
     warn "Apply terraform/aws-role and confirm ROLE_ARN / AUDIENCE in credentials.sh before relying on federation"
 fi
 rm -f /tmp/credentials.err
-
-# The track repo is used twice below: scripts/*.py is the pool-client fallback
-# and game/ is the Factory Floor. Clone it once.
-say "Cloning track repo from ${TRACK_REPO_URL}@${TRACK_REPO_REF}"
-git clone --depth 1 --branch "${TRACK_REPO_REF}" "${TRACK_REPO_URL}" "${SCRATCH}/track"
 
 say "Checking /opt/ld/util (GitHub account pool client)"
 if [ -f /opt/ld/util/pool.py ] && [ -f /opt/ld/util/gh_auth.py ] && [ -f /opt/ld/util/pat.py ] && [ -f /opt/ld/util/totp.py ]; then
