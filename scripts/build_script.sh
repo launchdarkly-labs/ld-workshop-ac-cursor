@@ -379,7 +379,7 @@ printf '%-28s %s\n' "/opt/ld/auto-factory" "$(git -C /opt/ld/auto-factory rev-pa
 printf '%-28s %s\n' "@launchdarkly/mcp-server" "$(npm ls -g @launchdarkly/mcp-server --depth=0 2>/dev/null | grep -o '@launchdarkly/mcp-server@[0-9.]*' || echo missing)"
 printf '%-28s %s\n' "/opt/ld/factory-floor" "$( [ -f /opt/ld/factory-floor/server.mjs ] && echo present || echo MISSING)"
 printf '%-28s %s\n' "factory-floor.service" "$(systemctl is-enabled factory-floor)"
-printf '%-28s %s\n' "/opt/ld/autofactory-app" "$( [ -e /opt/ld/autofactory-app ] && echo PRESENT (must not be) || echo absent, correct)"
+printf '%-28s %s\n' "/opt/ld/autofactory-app" "$( [ -e /opt/ld/autofactory-app ] && echo "PRESENT (must not be)" || echo "absent, correct")"
 
 say "Done. Save this VM as launchdarkly/workshop-autofactory-cursor from the Instruqt console."
 say "Not installed on purpose: ANTHROPIC/CURSOR keys, @cursor/sdk, Bedrock, code-server, ToggleWear."
