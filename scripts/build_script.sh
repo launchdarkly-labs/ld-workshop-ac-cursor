@@ -115,6 +115,25 @@ fi
 gh --version | head -1
 
 # ---------------------------------------------------------------------------
+# AWS CLI v2. The pool client falls back to the `BasicProfile` AWS profile when
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are not in the environment. That
+# profile's credential_process helper (/opt/bin/credentials.sh, GCP -> AWS
+# federation) shells out to `aws sts`, so without this binary the helper
+# prints an error instead of JSON and boto3 fails with JSONDecodeError.
+# ---------------------------------------------------------------------------
+if command -v aws >/dev/null 2>&1; then
+    say "aws CLI already present: $(aws --version 2>&1 | awk '{print $1}')"
+else
+    say "Installing AWS CLI v2"
+    AWS_ARCH="$(uname -m)"   # x86_64 or aarch64
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip
+    rm -rf /tmp/awscli && unzip -q -o /tmp/awscliv2.zip -d /tmp/awscli
+    /tmp/awscli/aws/install --update
+    rm -rf /tmp/awscliv2.zip /tmp/awscli
+fi
+aws --version
+
+# ---------------------------------------------------------------------------
 # Terraform: the inherited setup runs `terraform apply` in /opt/ld/terraform-ld-student.
 # The base image has it; install only if missing.
 # ---------------------------------------------------------------------------
@@ -304,6 +323,7 @@ say "Verification summary"
 printf '%-28s %s\n' "node"                 "$(node -v)"
 printf '%-28s %s\n' "npm"                  "$(npm -v)"
 printf '%-28s %s\n' "gh"                   "$(gh --version | head -1 | awk '{print $3}')"
+printf '%-28s %s\n' "aws"                  "$(aws --version 2>&1 | awk '{print $1}')"
 printf '%-28s %s\n' "jq"                   "$(jq --version)"
 printf '%-28s %s\n' "terraform"            "$(terraform version | head -1 | awk '{print $2}')"
 printf '%-28s %s\n' "python3"              "$(python3 --version | awk '{print $2}')"
