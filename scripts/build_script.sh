@@ -159,23 +159,6 @@ fi
 mkdir -p /opt/ld
 SCRATCH="$(mktemp -d)"
 
-# The track repo is used twice below: scripts/*.py is the pool-client fallback
-# and game/ is the Factory Floor. Clone it once.
-say "Cloning track repo from ${TRACK_REPO_URL}@${TRACK_REPO_REF}"
-git clone --depth 1 --branch "${TRACK_REPO_REF}" "${TRACK_REPO_URL}" "${SCRATCH}/track"
-
-say "Checking /opt/ld/util (GitHub account pool client)"
-if [ -f /opt/ld/util/pool.py ] && [ -f /opt/ld/util/gh_auth.py ] && [ -f /opt/ld/util/pat.py ] && [ -f /opt/ld/util/totp.py ]; then
-    echo "present: $(ls /opt/ld/util/*.py | xargs -n1 basename | tr '\n' ' ')"
-else
-    warn "/opt/ld/util is incomplete; this is not the image-pov-python-v2 base. Installing the pool client from the track repo's scripts/"
-    for f in pool.py gh_auth.py pat.py totp.py; do test -f "${SCRATCH}/track/scripts/${f}"; done
-    mkdir -p /opt/ld/util
-    cp "${SCRATCH}/track/scripts/"{pool,gh_auth,pat,totp}.py /opt/ld/util/
-    chmod +x /opt/ld/util/*.py
-fi
-PYTHONPATH=/opt/ld/util python3 -c 'import pool, gh_auth, pat, totp; print("pool client imports OK")'
-
 # ---------------------------------------------------------------------------
 # GCP -> AWS federation for the pool client. When AWS_ACCESS_KEY_ID /
 # AWS_SECRET_ACCESS_KEY are absent from the environment, boto3 opens the
@@ -211,6 +194,23 @@ else
     warn "Apply terraform/aws-role and confirm ROLE_ARN / AUDIENCE in credentials.sh before relying on federation"
 fi
 rm -f /tmp/credentials.err
+
+# The track repo is used twice below: scripts/*.py is the pool-client fallback
+# and game/ is the Factory Floor. Clone it once.
+say "Cloning track repo from ${TRACK_REPO_URL}@${TRACK_REPO_REF}"
+git clone --depth 1 --branch "${TRACK_REPO_REF}" "${TRACK_REPO_URL}" "${SCRATCH}/track"
+
+say "Checking /opt/ld/util (GitHub account pool client)"
+if [ -f /opt/ld/util/pool.py ] && [ -f /opt/ld/util/gh_auth.py ] && [ -f /opt/ld/util/pat.py ] && [ -f /opt/ld/util/totp.py ]; then
+    echo "present: $(ls /opt/ld/util/*.py | xargs -n1 basename | tr '\n' ' ')"
+else
+    warn "/opt/ld/util is incomplete; this is not the image-pov-python-v2 base. Installing the pool client from the track repo's scripts/"
+    for f in pool.py gh_auth.py pat.py totp.py; do test -f "${SCRATCH}/track/scripts/${f}"; done
+    mkdir -p /opt/ld/util
+    cp "${SCRATCH}/track/scripts/"{pool,gh_auth,pat,totp}.py /opt/ld/util/
+    chmod +x /opt/ld/util/*.py
+fi
+PYTHONPATH=/opt/ld/util python3 -c 'import pool, gh_auth, pat, totp; print("pool client imports OK")'
 
 say "Checking /opt/ld/terraform-ld-student (one LD project per sandbox)"
 if [ -f /opt/ld/terraform-ld-student/main.tf ]; then
