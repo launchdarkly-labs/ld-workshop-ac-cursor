@@ -76,18 +76,6 @@ export LD_SDK_KEY=$(curl -s -X GET \
 echo "export LD_SDK_KEY=${LD_SDK_KEY}" >> ~/.profile
 echo "export LD_SDK_KEY=${LD_SDK_KEY}" >> ~/.bashrc
 
-curl -X POST https://app.launchdarkly.com/api/v2/flags/${LD_PROJECT_KEY} \
-     -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" \
-     -H "Content-Type: application/json" \
-     -d '{
-  "name": "Coffee Promo 1",
-  "key": "coffee-promo-1",
-  "clientSideAvailability": {
-    "usingEnvironmentId": true,
-    "usingMobileKey": true
-  }
-}'
-
 USERID=$(echo "$GH_USER" | sed 's/[^0-9]//g')
 
 git config --global user.email "workshops+instruqtuser${USERID}@launchdarkly.com"
