@@ -1,14 +1,42 @@
 # Manual setup
 
 Everything here is work only a human can do — web UIs, one-time provisioning, and
-decisions with a credential attached. Claude Code does none of it and the specs
-assume it is already done.
+decisions with a credential attached. The specs assume it is already done. In
+practice, items 1, 5 (the IAM role), 6, and 7 were scripted with the track
+owner's own credentials and run from this machine; the status table below says
+what remains.
 
 Rough order. Items 1 through 5 block the first dry run. Item 6 blocks the build.
+
+## Status as of 2026-09-16
+
+| Item | State |
+|---|---|
+| 1. App repos | **Done.** All twelve created, seeded, tagged `pristine`, pool users granted write. |
+| 2. LaunchDarkly MCP in Cursor | Pending. Web UI. |
+| 3. Cursor Automations | Pending. Web UI. |
+| 4. Per-phase status in the prompt | Pending. Goes in with item 3. |
+| 5. Pool and sweeper | Table and sweeper reused as-is. **New:** the workstation's federated IAM role is applied (see 5). Sweeper invocation not yet re-confirmed. |
+| 6. Reference repos | **Done.** |
+| 7. VM image | **Done.** `launchdarkly/workshop-autofactory-cursor` saved from `scripts/build_script.sh`. |
+| Track on Instruqt | **Pushed** at `https://play.instruqt.com/manage/launchdarkly/tracks/ld-autofactory-cursor`, pointing at the real image. |
+| 8. Dry run | Not started. Blocked on items 2 and 3. |
 
 ---
 
 ## 1. Twelve app repos in `launchdarkly-training`
+
+**Done 2026-09-16.** Created with a throwaway script run by the track owner (the
+owner's `gh` login is an org admin), not by hand and not from the track repo.
+Each repo is public, seeded from one identical tree, and tagged `pristine` on
+the seed commit. One addition beyond the list below: a four-line `.gitignore`
+(`node_modules/`, `__pycache__/`, `.venv/`, `*.pyc`) so an agent's pull request
+never carries installed dependencies. Pool users `launchdarkly-user-01` through
+`-12` have **write** on the matching `autofactory-NN`, added directly with no
+pending invitations. Verified: `pristine` tag and all 14 seed files present.
+
+The original plan follows, for the record and for any future re-seed. Remember
+that re-seeding means moving the `pristine` tag, never deleting the repo.
 
 One per pool user, named to match the pool username's numeric suffix, because
 setup derives the repo name from it with no extra state:
@@ -133,22 +161,51 @@ Confirm:
   `dynamodb:UpdateItem`, and `secretsmanager:GetSecretValue` on the pool
   resources.
 
-Nothing new to provision here.
+**Done 2026-09-16: a dedicated IAM role for the workstation.** This turned out
+not to be "nothing new". The `RoleForAccessFromInstruqt` role the hand-copied
+credential helper pointed at is the ai-configs-intro track's Bedrock-only role,
+and its trust policy is pinned to that track's audience, so it could neither be
+assumed with this track's token nor read the pool table.
+`terraform/aws-role/` creates `InstruqtAutoFactoryCursorRole` in account
+`955116512041`, trusted by the Instruqt node-pool service account for audience
+`instruqt-agentcontrol-cursor`, with exactly the pool client's needs: Query and
+UpdateItem on `gh-copilot-workshop-users` and its GSIs, GetSecretValue on
+`gh-copilot-workshop/*`, PutSecretValue on the refresh-token secrets. Applied
+with the solutions-engineering admin SSO profile; state is local and gitignored.
+
+How the two credential paths split: the `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` Instruqt secrets are elevated and exist **only while the
+track-level setup and cleanup scripts run**, so those use static keys. During
+the interactive session they are gone, and anything touching AWS falls through
+to the `BasicProfile` profile, whose `credential_process` is
+`/opt/bin/credentials.sh` (`scripts/credentials.sh` in this repo). Both paths
+must keep working. Do not remove the two secrets from `config.yml`.
+
+Still to confirm: invoke the sweeper once and check its output.
 
 ---
 
 ## 6. Provide the reference repos to Claude Code
 
-The build needs all three as local unzipped directories. `CLAUDE.md` tells it to
-stop rather than build from memory if they are absent.
+**Done.** The build needs all three as local unzipped directories. `CLAUDE.md`
+tells it to stop rather than build from memory if they are absent.
 
-- `launchdarkly-auto-factory`
-- `ld-workshop-gh-copilot-cleanup`
-- `ld-workshop-ac-mcp`
+- `launchdarkly-auto-factory`: was only present as a zip in `~/Downloads`;
+  unzipped to `../_ref/launchdarkly-auto-factory-main/`, outside this repo. The
+  canonical source is `github.com/launchdarkly-labs/launchdarkly-auto-factory`.
+- `ld-workshop-gh-copilot-cleanup`: sibling directory, `instruqt/` tree.
+- `ld-workshop-ac-mcp`: sibling directory. Note its track lives in
+  `instruqt-build/`, not `instruqt/`.
 
 ---
 
 ## 7. Build and publish the VM image
+
+**Done 2026-09-16.** Saved as `launchdarkly/workshop-autofactory-cursor` from a
+VM built with `scripts/build_script.sh`, pasted into the console as root on top
+of `launchdarkly/image-pov-python-v2`. The script is idempotent; to rebuild,
+start from the same base and paste it again. Pin `AUTOFACTORY_REF` to a commit
+before a workshop so a push to that repo cannot change the provisioned configs.
 
 Per `image-requirements.md`. The two items most likely to bite:
 
@@ -157,13 +214,39 @@ Per `image-requirements.md`. The two items most likely to bite:
 - `npm ci` in `/opt/ld/auto-factory` at bake time, because doing it at lab time
   costs minutes.
 
+Four things that bit during the first bake, all now handled in the script:
+
+- **The AWS CLI was missing.** `credentials.sh` shells out to `aws sts`; without
+  the binary it printed an error and boto3 failed with a `JSONDecodeError`.
+- **The AWS CLI pager.** `aws sts get-caller-identity` on a TTY opens `less`,
+  which looks like a hang when the script is pasted. `AWS_PAGER=""` is exported.
+- **`credential_process` recursion.** Calling `aws` with `AWS_PROFILE=BasicProfile`
+  ran the helper, which inherited the profile and ran itself again forever.
+  The helper now unsets `AWS_PROFILE` before it calls `aws`, and the smoke test
+  uses `--profile` under `timeout`.
+- **macOS `bash -n` is Bash 3.2** and does not parse inside `$( )`, so it passed
+  a quoting error that Linux Bash 5 rejected. Check the script on Linux.
+
 ---
 
 ## 8. Dry run, in this order
 
+**Precondition met:** the track is pushed to Instruqt and points at the real
+image. **Precondition not met:** items 2 and 3. Until an Automation exists,
+challenge 03 opens a pull request and nothing answers it.
+
+When pushing the track again, `instruqt track push` writes `id` and `checksum`
+values back into `track.yml` and every `assignment.md`. Revert them with
+`git checkout -- instruqt/` before committing; the repo convention is stripped
+identifiers. The remote already exists, so a push after local edits may need
+`--force`.
+
 1. **Game against history.** Point the game at a repo with a completed run and
    confirm it replays to `complete`. This is testable without any agent running
-   and catches most of the parsing work.
+   and catches most of the parsing work. The server also takes a
+   `FACTORY_FIXTURE=<file.json>` env var that replays a hand-written PR history
+   with no GitHub access at all; it was exercised against idle, complete,
+   fallback-only, short-circuit, and rejected histories during the build.
 2. **One full session.** Single sandbox, watch a real chain end to end. Time each
    phase and write the numbers into challenge 03's assignment text.
 3. **Retooling.** Verify challenge 05 — does the agent actually honour a naming
@@ -190,8 +273,16 @@ Not blockers, but each one changes something:
 - **Queued agents.** If twelve concurrent cloud agents can queue, challenge 03's
   text needs a sentence about it, because a queued agent and a broken lab look
   identical from inside the sandbox.
-- **The demo change.** `track-spec.md` leaves the exact verbatim edit in challenge
-  03 to the builder, with instructions to pick something unambiguously
-  user-facing and report what it chose. Worth reviewing that choice, since a
-  change that reads as config-only will make the research planner correctly
-  short-circuit and no flag will be created.
+- **The demo change.** Chosen: challenge 03 adds a live **backend status** line
+  to the frontend page (fetches the backend's `/api/status` and shows service
+  and version, or "Backend offline"); challenge 05 adds a **Refresh greeting**
+  button. Both are full-file heredoc rewrites of `frontend/server.mjs` so the
+  run is reproducible. Still worth watching in the dry run: if the planner
+  short-circuits on either, the change needs to be more obviously user-facing.
+- **The Automation prompt's fallback project keys.** The shipped prompt ends
+  with two lines naming `auto-factory-prototype` and `autofactory-demo` "if the
+  rule failed to load". Setup rewrites the rule per session but cannot touch
+  the prompt, so consider dropping those lines when creating the Automations.
+- **Manifest filename.** The rule names the manifest after the branch
+  (`.release-flags/<change-id>.json`), not `pr-N.json` as `track-spec.md`
+  says. Assignments and solve scripts follow the rule.
