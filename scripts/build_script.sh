@@ -195,9 +195,12 @@ fi
 # Smoke test (warn-only): succeeds only on a GCE VM whose service account the
 # role trusts, with the role already applied. A failure here is expected if
 # terraform/aws-role has not been applied yet.
-if /opt/bin/credentials.sh 2>/tmp/credentials.err | jq -e '.Version == 1 and .AccessKeyId != null' >/dev/null 2>&1; then
+if timeout 60 /opt/bin/credentials.sh 2>/tmp/credentials.err | jq -e '.Version == 1 and .AccessKeyId != null' >/dev/null 2>&1; then
     echo "federation OK: credentials.sh returned temporary AWS credentials"
-    AWS_PROFILE=BasicProfile aws sts get-caller-identity --no-cli-pager --query Arn --output text || true
+    # --profile rather than AWS_PROFILE so the helper never inherits the profile
+    # name; timeout so a misbehaving helper cannot stall the bake.
+    timeout 60 aws sts get-caller-identity --profile BasicProfile --no-cli-pager --query Arn --output text \
+        || warn "get-caller-identity via BasicProfile did not return within 60s (see credentials.sh for the recursion guard)"
 else
     warn "credentials.sh did not return credentials: $(tr '\n' ' ' < /tmp/credentials.err | cut -c1-200)"
     warn "Apply terraform/aws-role and confirm ROLE_ARN / AUDIENCE in credentials.sh before relying on federation"

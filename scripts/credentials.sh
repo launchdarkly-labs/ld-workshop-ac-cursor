@@ -25,6 +25,14 @@
 
 set -euo pipefail
 
+# This script is itself a credential_process. If the caller set AWS_PROFILE to
+# the profile that points here, the inner `aws sts` call would resolve that
+# same profile and re-run this script forever. Strip anything that could make
+# the inner call consult a profile or page its output.
+unset AWS_PROFILE AWS_DEFAULT_PROFILE
+export AWS_PAGER=""
+export AWS_EC2_METADATA_DISABLED=true   # sts:AssumeRoleWithWebIdentity is unsigned; never probe IMDS
+
 AUDIENCE="instruqt-agentcontrol-cursor"
 ROLE_ARN="arn:aws:iam::955116512041:role/InstruqtAutoFactoryCursorRole"
 METADATA_URL="http://metadata/computeMetadata/v1/instance/service-accounts/default/identity"
