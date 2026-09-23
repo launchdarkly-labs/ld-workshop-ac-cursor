@@ -103,11 +103,15 @@ agent variable set af_repo "$AF_REPO"
 # session's agent branches and commits go away. The `pristine` tag is created
 # once, by hand, at repo provisioning time (see manual-setup.md).
 WORK=/opt/ld/autofactory-app
+printf '#!/bin/sh\necho "$GITHUB_TOKEN"\n' > /tmp/askpass && chmod 700 /tmp/askpass
+export GIT_ASKPASS=/tmp/askpass
 rm -rf "$WORK"
-git clone "https://x-access-token:${GH_TOKEN}@github.com/${AF_REPO}.git" "$WORK"
+git clone "https://x-access-token@github.com/${AF_REPO}.git" "$WORK"
 cd "$WORK"
 git checkout -B main refs/tags/pristine
-git push --force origin main
+git push "https://x-access-token@github.com/${AF_REPO}.git" --force origin main
+rm -f /tmp/askpass
+unset GIT_ASKPASS
 
 # Close anything the last session left open, in case its cleanup did not run.
 gh pr list --repo "$AF_REPO" --state open --json number -q '.[].number' \
