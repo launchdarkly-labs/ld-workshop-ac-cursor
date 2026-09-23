@@ -109,8 +109,8 @@ rm -rf "$WORK"
 git clone "https://x-access-token@github.com/${AF_REPO}.git" "$WORK"
 cd "$WORK"
 git checkout -B main refs/tags/pristine
-git push "https://x-access-token@github.com/${AF_REPO}.git" --force origin main
-rm -f /tmp/askpass
+git push --force-with-lease origin main
+trap 'rm -f /tmp/askpass' EXIT
 unset GIT_ASKPASS
 
 # Close anything the last session left open, in case its cleanup did not run.
