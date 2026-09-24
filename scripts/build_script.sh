@@ -244,9 +244,17 @@ git clone --depth 1 --branch "${AUTOFACTORY_REF}" "${AUTOFACTORY_REPO_URL}" /opt
 cd /opt/ld/auto-factory
 say "npm ci (workspaces: packages/*)"
 npm ci --no-audit --no-fund
-# Smoke: the bridge CLI is what setup calls. It runs TypeScript via tsx with no
-# build step, so tsx must be resolvable from the repo root.
+# The bridge CLI runs its own source via tsx, but it imports the
+# @auto-factory/shared workspace package, whose entry point is dist/index.js.
+# That file only exists after the TypeScript project build. Without this step
+# `npm run bridge -- provision` dies with ERR_MODULE_NOT_FOUND at lab start.
+say "npm run build (tsc --build, produces packages/*/dist)"
+npm run build
+test -f packages/shared/dist/index.js || { echo "packages/shared/dist/index.js missing after build" >&2; exit 1; }
+# Smoke: the bridge CLI is what setup calls. tsx must be resolvable from the
+# repo root, and the built shared package must import cleanly.
 node -e 'import("tsx").then(() => console.log("tsx resolvable: bridge CLI can run"))'
+node -e 'import("@auto-factory/shared").then(() => console.log("@auto-factory/shared loads from dist"))'
 test -f packages/config-bridge/src/cli.ts
 test -d config/agentcontrol/ai-configs && echo "agent configs: $(ls config/agentcontrol/ai-configs/*.json | wc -l)"
 test -f config/agentcontrol/graphs/auto-factory.json && echo "graph present"

@@ -103,15 +103,13 @@ agent variable set af_repo "$AF_REPO"
 # session's agent branches and commits go away. The `pristine` tag is created
 # once, by hand, at repo provisioning time (see manual-setup.md).
 WORK=/opt/ld/autofactory-app
-printf '#!/bin/sh\necho "$GITHUB_TOKEN"\n' > /tmp/askpass && chmod 700 /tmp/askpass
-export GIT_ASKPASS=/tmp/askpass
 rm -rf "$WORK"
 git clone "https://x-access-token@github.com/${AF_REPO}.git" "$WORK"
 cd "$WORK"
 git checkout -B main refs/tags/pristine
-git push --force-with-lease origin main
-trap 'rm -f /tmp/askpass' EXIT
-unset GIT_ASKPASS
+git -c credential.helper= \
+    -c credential.helper='!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f' \
+    push --force-with-lease origin main
 
 # Close anything the last session left open, in case its cleanup did not run.
 gh pr list --repo "$AF_REPO" --state open --json number -q '.[].number' \
@@ -133,19 +131,45 @@ git -C "$WORK" add .cursor/rules/autofactory.mdc
 git -C "$WORK" diff --cached --quiet || git -C "$WORK" \
   -c user.email="workshops@launchdarkly.com" -c user.name="AutoFactory Setup" \
   commit -m "Point AutoFactory at this session's LaunchDarkly project"
-git -C "$WORK" push origin main
+git -c credential.helper= \
+    -c credential.helper='!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f' \
+    -C "$WORK" push origin main
 
 # Seed the project with the agent configs, judge configs, graph, and operational
 # flags. `bridge provision` is idempotent and REST-only. It exits 1 if any single
 # resource fails (including ones this track never uses, such as the OpenAI
 # provider variations), so do not let that abort the whole lab: challenge 01's
 # check verifies the two configs the chain actually needs.
+# Output goes to a log the learner and the check script can read; the exit code
+# is tolerated, but the two configs the chain cannot run without are verified
+# right after, and their absence fails setup loudly instead of one challenge later.
+PROVISION_LOG=/var/log/autofactory-provision.log
 cd /opt/ld/auto-factory
+# The bridge imports the @auto-factory/shared workspace package from its
+# compiled dist/. The image build produces it; if an older image did not, build
+# here rather than fail provisioning with ERR_MODULE_NOT_FOUND.
+if [ ! -f packages/shared/dist/index.js ]; then
+  echo "AutoFactory packages are not built in this image; running npm run build (one-time, ~1 min)"
+  npm run build
+fi
+echo "Provisioning AutoFactory into ${LD_PROJECT_KEY} (log: ${PROVISION_LOG})"
 LD_API_KEY="${LAUNCHDARKLY_ACCESS_TOKEN}" \
 LD_PROJECT_KEY="${LD_PROJECT_KEY}" \
 LD_BASE_URL="https://app.launchdarkly.com" \
-  npm run bridge -- provision \
-  || echo "bridge provision reported failures; continuing (challenge 01 check validates the agent configs)"
+  npm run bridge -- provision 2>&1 | tee "$PROVISION_LOG" \
+  || echo "bridge provision exited non-zero; checking whether the required configs exist anyway"
+
+for KEY in autofactory-flag-implementer autofactory-metrics-author autofactory-research-planner; do
+  STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+    "https://app.launchdarkly.com/api/v2/projects/${LD_PROJECT_KEY}/ai-configs/${KEY}" \
+    -H "Authorization: ${LAUNCHDARKLY_ACCESS_TOKEN}" -H "LD-API-Version: beta")
+  if [ "$STATUS" != "200" ]; then
+    echo "AI config ${KEY} is missing from ${LD_PROJECT_KEY} after provisioning (HTTP ${STATUS}). Last lines of ${PROVISION_LOG}:" >&2
+    tail -n 30 "$PROVISION_LOG" >&2 || true
+    exit 1
+  fi
+done
+echo "AutoFactory agent configs present in ${LD_PROJECT_KEY}"
 
 # Start the game with this session's context.
 GAME_ENV=/opt/ld/factory-floor/.env
