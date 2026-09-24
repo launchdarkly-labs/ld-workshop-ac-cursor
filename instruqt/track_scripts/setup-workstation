@@ -152,11 +152,29 @@ if [ ! -f packages/shared/dist/index.js ]; then
   echo "AutoFactory packages are not built in this image; running npm run build (one-time, ~1 min)"
   npm run build
 fi
+# LaunchDarkly requires isInverted on custom judge configs. Bridge versions
+# that predate that field cannot create the two judges, and the failure
+# cascades to the two agents that attach them and to the graph. When the
+# checked-out bridge lacks the field, provision from a filtered copy of the
+# configs with the judges and their attachments removed; the chain never runs
+# the judges on the Cursor path. Upstream fix: launchdarkly-auto-factory PR
+# "config-bridge: send isInverted for judge configs".
+PROVISION_ARGS=""
+if ! grep -q 'isInverted' packages/config-bridge/src/provision.ts; then
+  FILTERED=/tmp/af-ai-configs
+  rm -rf "$FILTERED" && mkdir -p "$FILTERED"
+  for f in config/agentcontrol/ai-configs/*.json; do
+    case "$(basename "$f")" in *judge*) continue ;; esac
+    jq 'del(.variations[]?.judgeConfiguration)' "$f" > "$FILTERED/$(basename "$f")"
+  done
+  PROVISION_ARGS="--ai-configs $FILTERED"
+  echo "bridge lacks isInverted support; provisioning without the two judge configs"
+fi
 echo "Provisioning AutoFactory into ${LD_PROJECT_KEY} (log: ${PROVISION_LOG})"
 LD_API_KEY="${LAUNCHDARKLY_ACCESS_TOKEN}" \
 LD_PROJECT_KEY="${LD_PROJECT_KEY}" \
 LD_BASE_URL="https://app.launchdarkly.com" \
-  npm run bridge -- provision 2>&1 | tee "$PROVISION_LOG" \
+  npm run bridge -- provision $PROVISION_ARGS 2>&1 | tee "$PROVISION_LOG" \
   || echo "bridge provision exited non-zero; checking whether the required configs exist anyway"
 
 for KEY in autofactory-flag-implementer autofactory-metrics-author autofactory-research-planner; do

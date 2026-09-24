@@ -41,7 +41,7 @@ Open the [LaunchDarkly](#tab-0) tab.
 1. From the left-hand navigation, where you see the **Code | Agents** selector, click **Agents**.
 2. Under Agents, click **Configs**.
 
-Nine AI configs were provisioned into this project when your lab started. Six of them sit on the pull-request path in the agent graph:
+The AutoFactory agent configs were provisioned into this project when your lab started. Six of them sit on the pull-request path in the agent graph:
 
 - **AutoFactory Research & Planning Agent** reads the diff, decides whether the change needs a flag at all, and writes the brief for everyone downstream.
 - **AutoFactory Manifest Steward** tidies the release manifest so the human-owned intent block stays well formed.
@@ -50,7 +50,7 @@ Nine AI configs were provisioned into this project when your lab started. Six of
 - **AutoFactory Flag Testing Agent** writes flag-on and flag-off tests and runs them to green.
 - **AutoFactory Code Review Agent** inspects the whole change and issues a verdict with a risk level.
 
-The cloud automation runs those six as five phases, because the steward's small step is folded into the flag phase. The remaining three configs never touch your pull request. The two **Judge** configs grade the flag implementer's and metrics author's work after the fact. The **Issue Coder** is a separate entry point for turning a GitHub issue into a branch, and it does not run on this line.
+The cloud automation runs those six as five phases, because the steward's small step is folded into the flag phase. The others never touch your pull request. The **Issue Coder** is a separate entry point for turning a GitHub issue into a branch, and it does not run on this line. If your project also shows two **Judge** configs, those grade the flag implementer's and metrics author's work after the fact in AutoFactory's other runtimes; the Cursor path does not invoke them.
 
 # Read an instruction sheet
 
