@@ -96,6 +96,19 @@ If that trade is not acceptable, the alternative is twelve Cursor accounts with
 twelve scoped tokens, which is a much larger operational lift. Worth deciding
 before building rather than after.
 
+**Seen in the first dry run (2026-09-24): the connection expires.** The agent
+ran and every LaunchDarkly MCP call failed with `401 token_expired`,
+`"action":"reauthenticate"`, including the caller-identity probe
+`get-member-self`. It retried for two and a half minutes and then halted,
+reporting all five phases as `skipped` and creating nothing. A connection made
+through the MCP dropdown's sign-in flow is an OAuth session, and OAuth sessions
+expire; a workshop cannot depend on someone re-authenticating between
+sessions. Use a long-lived **API access token** (`api-...`) instead: create it
+in LaunchDarkly with the operator-level role described above, store it as a
+Cloud Agent secret (Cursor Dashboard → Cloud Agents → Secrets), and configure
+the LaunchDarkly MCP server to read it from that secret. The agent's own halt
+comment pointed at exactly this fix.
+
 ---
 
 ## 3. Twelve Cursor Automations
@@ -106,7 +119,15 @@ At **cursor.com/automations** (or `/automate`), one per repo. For each:
 - **Tools enabled:** LaunchDarkly MCP, Open PR, Comment on PR.
 - **Prompt:** the body of
   `bootstrap/cursor-automation/cloud-automation-prompt.md`, everything below the
-  horizontal rule, **plus the per-phase status addition in section 4 below.**
+  horizontal rule, **plus the per-phase status addition in section 4 below,
+  minus the two fallback project-key lines.** The shipped prompt says to fetch
+  agent configs from `auto-factory-prototype` and create flags in
+  `autofactory-demo` "if the rule failed to load". Setup rewrites the rule
+  file per session; it cannot touch the prompt. In the first dry run the
+  agent's halt comment named both of those default projects, so it does read
+  them. Delete those lines. With them gone, the only project key the agent
+  can find is the one in `.cursor/rules/autofactory.mdc`, which is the right
+  one for that session.
 
 Before creating all twelve, create one and answer this: **does an Automation bind
 to a repository by path or by internal id?** If by path, a repo that is ever

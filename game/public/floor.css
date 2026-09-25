@@ -63,6 +63,7 @@ body {
 #runstate[data-state="complete"] { color: var(--ok); }
 #runstate[data-state="rejected"] { color: var(--stop); }
 #runstate[data-state="short_circuited"] { color: var(--neutral); }
+#runstate[data-state="halted"] { color: var(--stop); }
 #runstate[data-state="idle"] { color: var(--muted); }
 
 #banner {
@@ -134,6 +135,8 @@ body {
 #placard[data-state="complete"] { border-left-color: var(--ok); }
 #placard[data-state="rejected"] { border-left-color: var(--stop); }
 #placard[data-state="short_circuited"] { border-left-color: var(--neutral); }
+#placard[data-state="halted"] { border-left-color: var(--stop); }
+#placard a { color: var(--info); }
 #placard h2 { margin: 0 0 4px; font-size: 14px; }
 #placard dl { margin: 6px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
 #placard dt { color: var(--muted); }

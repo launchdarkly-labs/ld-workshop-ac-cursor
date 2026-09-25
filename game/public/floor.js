@@ -157,7 +157,9 @@
 
     // Gates lift when their phase is complete or skipped.
     for (const g of gates) {
-      const open = g.status === "complete" || g.status === "skipped";
+      // A halted run reports every phase skipped without doing anything; keep
+      // those gates shut so the floor does not look like progress.
+      const open = g.status === "complete" || (g.status === "skipped" && run !== "halted");
       g.openness = approach(g.openness, open ? 1 : 0, 1 / 0.9, dt);
       g.lamp += dt;
     }
@@ -485,6 +487,7 @@
       complete: "shift complete",
       rejected: `inspection failed${s.verdict.riskLevel ? ` · risk ${s.verdict.riskLevel}` : ""}`,
       short_circuited: "no flag needed · line diverted",
+      halted: "line halted · the agents could not run",
     }[s.runState];
     strip.phase.textContent = phaseText || "";
 
@@ -504,7 +507,11 @@
       card.style.left = `${(GATE_XS[i] / W) * 100}%`;
       card.style.top = "6%";
       card.title = `Opened by the ${p.openedBy}`;
-      const status = p.status === "complete" ? "open" : p.status === "started" ? "working" : p.status === "skipped" ? "skipped" : "shut";
+      const status =
+        p.status === "complete" ? "open"
+        : p.status === "started" ? "working"
+        : p.status === "skipped" ? (s.runState === "halted" ? "halted" : "skipped")
+        : "shut";
       let html = `<div class="title">${esc(p.label)}</div><div class="status">${status}</div>`;
       if (p.status !== "pending") html += `<small>${esc(p.openedBy)}</small>`;
       if (p.artifacts && p.artifacts.length) {
@@ -548,6 +555,14 @@
         `<h2>Quality Inspection rejected the change</h2>` +
         `<p>The code reviewer did not approve. Risk level: <code>${esc(s.verdict.riskLevel || "not stated")}</code>. ` +
         `The exit stays shut. Read the reviewer's comment on the pull request for what it found.</p>`;
+    } else if (s.runState === "halted") {
+      placard.hidden = false;
+      placard.dataset.state = "halted";
+      placard.innerHTML =
+        `<h2>Line halted before the first gate</h2>` +
+        `<p>The automation started but could not do its work, so it reported every phase as skipped and created nothing: no flag, no metrics, no manifest, no second pull request. ` +
+        `The reason is in its comment on ${s.triggeringPr && s.triggeringPr.url ? `<a href="${esc(s.triggeringPr.url)}" target="_blank" rel="noopener">pull request #${s.triggeringPr.number}</a>` : "your pull request"}. ` +
+        `This is a lab-environment problem, not something your change caused.</p>`;
     } else if (s.runState === "short_circuited") {
       placard.hidden = false;
       placard.dataset.state = "short_circuited";

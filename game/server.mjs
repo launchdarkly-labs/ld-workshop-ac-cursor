@@ -224,9 +224,10 @@ function deriveState({ triggering, agent, comments }) {
         /* not JSON; ignore the block */
       }
     }
-    if (!sawFence && /review_approved/.test(body)) {
-      const m = body.match(/\{[^{}]*review_approved[^{}]*\}/);
-      if (m) {
+    // Unfenced fallback: agents sometimes paste the JSON objects inline. Any
+    // flat object naming autofactory_phase or review_approved counts.
+    if (!sawFence && /autofactory_phase|review_approved/.test(body)) {
+      for (const m of body.matchAll(/\{[^{}]*"(?:autofactory_phase|review_approved)"[^{}]*\}/g)) {
         try {
           applyBlock(JSON.parse(m[0]), c.created_at);
         } catch {
@@ -268,10 +269,22 @@ function deriveState({ triggering, agent, comments }) {
   if (byKey.flag.artifacts.length === 0 && linkedFlags.size) byKey.flag.artifacts = [...linkedFlags];
   if (byKey.metrics.artifacts.length === 0 && linkedMetrics.size) byKey.metrics.artifacts = [...linkedMetrics];
 
+  // A chain that could not run at all (for example, the agent's LaunchDarkly
+  // MCP connection was unauthenticated) reports every phase as skipped,
+  // starting with research. That is a halt, not a short-circuit and not
+  // progress: the gates stay shut and the placard points at the PR comment.
+  const halted =
+    !agent &&
+    verdict.reviewApproved === null &&
+    byKey.research.status === "skipped" &&
+    byKey.research.source === "comment" &&
+    !shortCircuit;
+
   let runState = "idle";
   if (triggering) {
     if (verdict.reviewApproved === false) runState = "rejected";
     else if (agent && verdict.reviewApproved === true) runState = "complete";
+    else if (halted) runState = "halted";
     else if (shortCircuit && !agent) runState = "short_circuited";
     else runState = "running";
   }
