@@ -30,6 +30,15 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(HERE, "public");
 
+// Game version, from package.json. Bump it with every change to game/ so an
+// image can be checked with `curl localhost:7777/api/health`.
+let VERSION = "unknown";
+try {
+  VERSION = JSON.parse(fs.readFileSync(path.join(HERE, "package.json"), "utf8")).version || VERSION;
+} catch {
+  /* leave unknown */
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -321,6 +330,7 @@ function deriveState({ triggering, agent, comments }) {
   const inFlight = phases.find((p) => p.status === "started") || phases.find((p) => p.status === "pending") || null;
 
   return {
+    version: VERSION,
     repo: CONFIG.repo,
     ldProjectKey: CONFIG.ldProjectKey,
     runState,
@@ -450,11 +460,11 @@ const server = http.createServer((req, res) => {
   }
   const pathname = new URL(req.url, "http://localhost").pathname;
   if (pathname === "/api/state") return sendJson(res, 200, state);
-  if (pathname === "/api/health") return sendJson(res, 200, { ok: true, source: source.name, repo: CONFIG.repo });
+  if (pathname === "/api/health") return sendJson(res, 200, { ok: true, version: VERSION, source: source.name, repo: CONFIG.repo });
   return serveStatic(req, res);
 });
 
 server.listen(CONFIG.port, () => {
-  console.log(`[factory-floor] listening on :${CONFIG.port} watching ${CONFIG.repo || "(no repo)"} via ${source.name}`);
+  console.log(`[factory-floor] v${VERSION} listening on :${CONFIG.port} watching ${CONFIG.repo || "(no repo)"} via ${source.name}`);
   tick();
 });

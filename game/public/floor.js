@@ -479,6 +479,7 @@
   function renderChrome() {
     const s = server;
     strip.repo.textContent = s.repo || "no repo configured";
+    strip.repo.title = `assigned repository · Factory Floor v${s.version || "?"}`;
     strip.runstate.textContent = s.runState.replace("_", " ");
     strip.runstate.dataset.state = s.runState;
 
@@ -586,8 +587,8 @@
 
     if (s.runState === "idle") {
       hint.innerHTML = s.repo
-        ? `Waiting for a pull request on <code>${esc(s.repo)}</code>. Open one and the flaglings clock in.`
-        : `No repository configured.`;
+        ? `Waiting for a pull request on <code>${esc(s.repo)}</code>. Open one and the flaglings clock in. <span class="ver">v${esc(s.version || "?")}</span>`
+        : `No repository configured. <span class="ver">v${esc(s.version || "?")}</span>`;
     } else if (s.runState === "running") {
       hint.textContent = "Gates lift when the agents post their progress on the pull request. Slow gates are honest gates.";
     } else {

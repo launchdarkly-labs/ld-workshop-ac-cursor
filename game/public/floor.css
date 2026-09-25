@@ -151,3 +151,4 @@ body {
   padding: 0 4px;
 }
 #hint code { color: var(--text); }
+#hint .ver { float: right; color: var(--line); }
