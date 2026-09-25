@@ -172,7 +172,37 @@ function truthyVerdict(v) {
   return null;
 }
 
-const FENCE_RE = /```[\w-]*[ \t]*\r?\n([\s\S]*?)```/g;
+// Fenced block, with or without a language tag, with or without a newline after
+// the opening fence (agents sometimes write ```json { ... } ``` on one line).
+const FENCE_RE = /```[\w-]*[ \t]*\r?\n?([\s\S]*?)```/g;
+// Bare object mentioning one of our keys, for comments that skip the fence.
+const BARE_OBJ_RE = /\{[^{}]*(?:autofactory_phase|review_approved)[^{}]*\}/g;
+
+/**
+ * Parse an agent-written JSON-ish object. Agents drift from strict JSON:
+ * single-quoted strings, unquoted keys, trailing commas, Python booleans.
+ * Try strict first, then a normalised copy. Returns null when hopeless.
+ */
+function parseLoose(text) {
+  const t = String(text).trim();
+  try {
+    return JSON.parse(t);
+  } catch {
+    /* fall through */
+  }
+  const fixed = t
+    .replace(/'/g, '"')
+    .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":')
+    .replace(/\bTrue\b/g, "true")
+    .replace(/\bFalse\b/g, "false")
+    .replace(/\bNone\b/g, "null")
+    .replace(/,\s*([}\]])/g, "$1");
+  try {
+    return JSON.parse(fixed);
+  } catch {
+    return null;
+  }
+}
 const SHORT_CIRCUIT_RE =
   /no (?:feature )?flag (?:is |was )?(?:needed|required)|does(?:n't| not) (?:need|require) a (?:feature )?flag|skip_flagging["']?\s*[:=]\s*["']?true|short[- ]?circuit/i;
 const FLAG_LINK_RE = /app\.launchdarkly\.com\/[^/\s)]+\/~\/features\/([A-Za-z0-9._-]+)/g;
@@ -215,24 +245,20 @@ function deriveState({ triggering, agent, comments }) {
   const ordered = [...(comments || [])].sort((a, b) => Date.parse(a.created_at || 0) - Date.parse(b.created_at || 0));
   for (const c of ordered) {
     const body = String(c.body || "");
-    let sawFence = false;
+    let applied = 0;
     for (const m of body.matchAll(FENCE_RE)) {
-      sawFence = true;
-      try {
-        applyBlock(JSON.parse(m[1].trim()), c.created_at);
-      } catch {
-        /* not JSON; ignore the block */
+      const obj = parseLoose(m[1]);
+      if (obj) {
+        applyBlock(obj, c.created_at);
+        applied += 1;
       }
     }
-    // Unfenced fallback: agents sometimes paste the JSON objects inline. Any
-    // flat object naming autofactory_phase or review_approved counts.
-    if (!sawFence && /autofactory_phase|review_approved/.test(body)) {
-      for (const m of body.matchAll(/\{[^{}]*"(?:autofactory_phase|review_approved)"[^{}]*\}/g)) {
-        try {
-          applyBlock(JSON.parse(m[0]), c.created_at);
-        } catch {
-          /* ignore */
-        }
+    // Fallback: bare objects anywhere in the body (no fence, or a fence whose
+    // content did not parse as a whole).
+    if (applied === 0 && /autofactory_phase|review_approved/.test(body)) {
+      for (const m of body.matchAll(BARE_OBJ_RE)) {
+        const obj = parseLoose(m[0]);
+        if (obj) applyBlock(obj, c.created_at);
       }
     }
     if (SHORT_CIRCUIT_RE.test(body)) shortCircuit = true;
@@ -345,7 +371,10 @@ async function poll() {
     const t = Date.parse(triggering.pr.created_at || 0);
     agent = enriched.find((e) => e.hasManifest && Date.parse(e.pr.created_at || 0) > t) || null;
   }
-  const comments = triggering ? await source.comments(triggering.pr) : [];
+  // The Automation is told to comment on the triggering PR, but the summary
+  // (and the verdict) sometimes lands on the agent's own PR. Read both.
+  let comments = triggering ? await source.comments(triggering.pr) : [];
+  if (agent) comments = comments.concat(await source.comments(agent.pr));
   return deriveState({ triggering, agent, comments });
 }
 

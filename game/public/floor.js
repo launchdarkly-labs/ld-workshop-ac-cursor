@@ -118,14 +118,23 @@
   }
 
   // ---- server sync ------------------------------------------------------------
+  // Relative URL so the page also works when a proxy mounts it under a prefix.
+  const STATE_URL = new URL("api/state", window.location.href).toString();
+
   async function pollServer() {
     try {
-      const res = await fetch("/api/state", { cache: "no-store" });
+      const res = await fetch(STATE_URL, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       server = await res.json();
       fetchFailed = false;
     } catch (err) {
       fetchFailed = true;
+      // Before the first successful fetch there is no state to render, but the
+      // learner still needs to know the page cannot reach its server.
+      if (!server) {
+        banner.hidden = false;
+        banner.textContent = `The floor cannot reach its server at ${STATE_URL} (${err && err.message ? err.message : err}). Retrying every 2 seconds.`;
+      }
     }
     applyServer();
     setTimeout(pollServer, 2000);
