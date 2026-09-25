@@ -37,7 +37,34 @@ Every learner gets their own copy of the demo app, and yours is:
 [[ Instruqt-Var key="af_repo" hostname="workstation" ]]
 ```
 
-Setup reset it to a clean state and cloned it onto this workstation. Open the [Terminal](#tab-0) tab and look at what Cursor sees:
+# Sign in to GitHub
+
+You will watch the line's work land on GitHub, so sign in once now and you stay signed in for the rest of the shift. Open the [GitHub](#tab-2) tab and sign in with the account assigned to your session:
+
+**Username:**
+```text
+[[ Instruqt-Var key="gh_user" hostname="workstation" ]]
+```
+**Password:**
+```text
+[[ Instruqt-Var key="gh_pass" hostname="workstation" ]]
+```
+**2FA code:**
+```text
+[[ Instruqt-Var key="gh_totp" hostname="workstation" ]]
+```
+
+> The 2FA code rotates every 30 seconds. If the one above has expired by the time GitHub asks for it, open the [Terminal](#tab-0) tab and print a fresh one:
+
+```text
+gh-totp
+```
+
+Once you are in, open `https://github.com/[[ Instruqt-Var key="af_repo" hostname="workstation" ]]`. That is the repo the automation is bound to. Right now it has no pull requests; by the end of the next challenge it will have two.
+
+# The clone on your workstation
+
+Setup reset the repo to a clean state and cloned it onto this workstation. Open the [Terminal](#tab-0) tab and look at what Cursor sees:
 
 ```text
 cd /opt/ld/autofactory-app && ls -R .cursor

@@ -1,3 +1,17 @@
-#!/bin/sh
-# The repo is already cloned at /opt/ld/autofactory-app by track setup.
+#!/bin/bash
+#
+# Refresh the gh_totp Instruqt-Var so the assignment shows a 2FA code minted
+# at the moment this challenge opens, not at track start, which could be many
+# minutes earlier. The learner signs in to GitHub in this challenge.
+#
+# totp.py reads the seed from Secrets Manager. No static AWS keys exist in the
+# sandbox at challenge time, so this goes through the BasicProfile federation
+# path (see scripts/credentials.sh).
+
+set -eu
+
+GH_USER="$(agent variable get gh_user)"
+GH_TOTP="$(PYTHONPATH=/opt/ld/util python3 -m totp current "$GH_USER")"
+agent variable set gh_totp "$GH_TOTP"
+
 exit 0

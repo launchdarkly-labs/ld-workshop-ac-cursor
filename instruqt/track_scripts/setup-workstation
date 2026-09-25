@@ -41,9 +41,9 @@ echo "$GH_TOKEN" | gh auth login --with-token >/dev/null 2>&1 || true
 gh auth setup-git 2>/dev/null || git config --global credential.helper '!gh auth git-credential'
 
 # Install gh-totp so learners can regenerate the 2FA code at any moment.
-# The gh_totp Instruqt-Var itself is refreshed by 02-configure-mcp-server's
+# The gh_totp Instruqt-Var itself is refreshed by 02-how-agents-get-their-orders'
 # per-challenge setup-workstation, so it's freshly minted when the learner
-# actually needs it.
+# signs in to GitHub there.
 cat > /usr/local/bin/gh-totp <<WRAP
 #!/usr/bin/env bash
 exec env PYTHONPATH=/opt/ld/util python3 -m totp current "$GH_USER"
