@@ -33,6 +33,12 @@ echo "export GH_USER=\"$GH_USER\"" >> ~/.bashrc
 # Wire the GitHub App access token into both gh and copilot CLIs.
 # `copilot` CLI checks COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN.
 echo "$GH_TOKEN" | gh auth login --with-token >/dev/null 2>&1 || true
+# Make plain `git push` work from the learner's shell with no prompt: gh
+# registers itself as git's credential helper for github.com and answers with
+# the token it just stored. The clone URL's `x-access-token@` username is what
+# GitHub expects alongside an installation token. Without this, challenge 03's
+# push asks for a password the learner does not have.
+gh auth setup-git 2>/dev/null || git config --global credential.helper '!gh auth git-credential'
 
 # Install gh-totp so learners can regenerate the 2FA code at any moment.
 # The gh_totp Instruqt-Var itself is refreshed by 02-configure-mcp-server's
