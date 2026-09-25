@@ -146,12 +146,15 @@ The game opens its gates from comments on the triggering PR. Without this, it
 falls back to inferring progress from the agent PR's contents, which works but
 means gates 2 and 3 open together at the end instead of in sequence.
 
-Append this to each Automation's prompt. The first, gentler wording ("as each
-of the five phases completes, post a short comment") was in the prompt during
-the first full run and the agent posted nothing per phase; it batched
-everything into the final summary, so the floor learned nothing until the
-agent's pull request appeared. This wording makes the comment part of
-finishing the phase.
+Append this to each Automation's prompt. A correction to an earlier version of
+this note: during the first full run the agent **did** post a per-phase status
+block, promptly and well formed, under the original gentler wording. The floor
+still opened nothing, because Cursor's "Comment on PR" tool posts **pull
+request reviews**, and the game (and the challenge 03 check) read only
+conversation comments, which the `issues/{n}/comments` endpoint returns. Both
+now read reviews too (game 1.2.0). The stronger wording below is kept because
+it costs nothing and makes the timing explicit, not because the agent failed
+to comply.
 
 > ## Progress reporting (required, per phase, not deferred)
 >

@@ -129,8 +129,24 @@ const githubSource = {
     filesCache.set(pr.number, { sha, files });
     return files;
   },
+  /**
+   * Everything written on the PR, normalised to { body, created_at }.
+   * Cursor's "Comment on PR" tool posts pull request REVIEWS, which the
+   * issues/{n}/comments endpoint does not return, so read all three lists:
+   * conversation comments, review bodies, and inline review comments.
+   */
   async comments(pr) {
-    return githubGet(`/repos/${CONFIG.repo}/issues/${pr.number}/comments?per_page=100`);
+    const n = pr.number;
+    const [issue, reviews, reviewComments] = await Promise.all([
+      githubGet(`/repos/${CONFIG.repo}/issues/${n}/comments?per_page=100`),
+      githubGet(`/repos/${CONFIG.repo}/pulls/${n}/reviews?per_page=100`),
+      githubGet(`/repos/${CONFIG.repo}/pulls/${n}/comments?per_page=100`),
+    ]);
+    return [
+      ...issue.map((c) => ({ body: c.body, created_at: c.created_at })),
+      ...reviews.map((r) => ({ body: r.body, created_at: r.submitted_at })),
+      ...reviewComments.map((c) => ({ body: c.body, created_at: c.created_at })),
+    ].filter((c) => c.body);
   },
 };
 
@@ -146,7 +162,11 @@ function fixtureSource(file) {
       return (pr.files || []).map((f) => (typeof f === "string" ? f : f.filename));
     },
     async comments(pr) {
-      return pr.comments || [];
+      // Fixtures may list `reviews` (with submitted_at) alongside `comments`.
+      return [
+        ...(pr.comments || []),
+        ...(pr.reviews || []).map((r) => ({ body: r.body, created_at: r.submitted_at || r.created_at })),
+      ];
     },
   };
 }
@@ -382,7 +402,8 @@ async function poll() {
     agent = enriched.find((e) => e.hasManifest && Date.parse(e.pr.created_at || 0) > t) || null;
   }
   // The Automation is told to comment on the triggering PR, but the summary
-  // (and the verdict) sometimes lands on the agent's own PR. Read both.
+  // (and the verdict) sometimes lands on the agent's own PR. Read both. Each
+  // list already includes reviews and inline review comments.
   let comments = triggering ? await source.comments(triggering.pr) : [];
   if (agent) comments = comments.concat(await source.comments(agent.pr));
   return deriveState({ triggering, agent, comments });

@@ -5,7 +5,9 @@
 #   2. The automation's own pull request exists: a PR whose changed files
 #      include a path under .release-flags/. That is the same loop-guard rule
 #      the Automation prompt and the Factory Floor use to tell the two apart.
-#   3. The learner's pull request carries a comment with the review verdict.
+#   3. The learner's pull request carries the review verdict. Cursor's
+#      "Comment on PR" tool posts pull request REVIEWS, not conversation
+#      comments, so both lists are read.
 #
 # The flag itself is asserted in challenge 04, so a failure here points at the
 # pull-request half and a failure there points at the LaunchDarkly half.
@@ -45,7 +47,7 @@ if [ -z "$AGENT_PRS" ]; then
 fi
 
 for N in $LEARNER_PRS; do
-  if gh api "repos/${AF_REPO}/issues/${N}/comments" --paginate -q '.[].body' 2>/dev/null | grep -q 'review_approved'; then
+  if { gh api "repos/${AF_REPO}/issues/${N}/comments" --paginate -q '.[].body' 2>/dev/null; gh api "repos/${AF_REPO}/pulls/${N}/reviews" --paginate -q '.[].body' 2>/dev/null; } | grep -q 'review_approved'; then
     exit 0
   fi
 done

@@ -121,7 +121,10 @@
   // Relative URL so the page also works when a proxy mounts it under a prefix.
   const STATE_URL = new URL("api/state", window.location.href).toString();
 
+  let pollTimer = null;
+
   async function pollServer() {
+    clearTimeout(pollTimer);
     try {
       const res = await fetch(STATE_URL, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -136,9 +139,21 @@
         banner.textContent = `The floor cannot reach its server at ${STATE_URL} (${err && err.message ? err.message : err}). Retrying every 2 seconds.`;
       }
     }
-    applyServer();
-    setTimeout(pollServer, 2000);
+    try {
+      applyServer();
+    } catch (err) {
+      // A rendering bug must never stop the polling loop; the gates are driven
+      // by gate state set before rendering, so keep going and log it.
+      console.error("[factory-floor] render failed", err);
+    } finally {
+      pollTimer = setTimeout(pollServer, 2000);
+    }
   }
+
+  // Browsers throttle timers in hidden tabs; poll at once when the tab is back.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") pollServer();
+  });
 
   function applyServer() {
     if (!server) return;
