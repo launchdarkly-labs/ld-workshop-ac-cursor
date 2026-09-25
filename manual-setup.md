@@ -146,21 +146,62 @@ The game opens its gates from comments on the triggering PR. Without this, it
 falls back to inferring progress from the agent PR's contents, which works but
 means gates 2 and 3 open together at the end instead of in sequence.
 
-Append this to each Automation's prompt:
+Append this to each Automation's prompt. The first, gentler wording ("as each
+of the five phases completes, post a short comment") was in the prompt during
+the first full run and the agent posted nothing per phase; it batched
+everything into the final summary, so the floor learned nothing until the
+agent's pull request appeared. This wording makes the comment part of
+finishing the phase.
 
-> **Progress reporting.** As each of the five phases completes, post a short
-> comment on the triggering pull request containing a fenced JSON block of
-> exactly this shape, and nothing else in the block:
+> ## Progress reporting (required, per phase, not deferred)
+>
+> The pull request is your progress log. A dashboard reads your comments on
+> the **triggering** pull request and opens one gate per phase as you report
+> it, so a comment posted late is a gate that stays shut.
+>
+> **Rule: a phase is not finished until its status comment is posted.**
+> Immediately after you complete a phase, and **before you begin the next
+> one**, post a comment on the triggering pull request. Do this five times, once
+> for each of `research`, `flag`, `metrics`, `tests`, `review`. Never batch these
+> comments, never combine two phases into one comment, and never wait for the
+> chain to finish. Posting the comment is the last step of every phase.
+>
+> Each status comment must contain exactly one fenced JSON block of this shape,
+> using strict JSON with double quotes and lowercase `true`/`false`, and
+> nothing else inside the fence:
 >
 > ```json
-> { "autofactory_phase": "research", "status": "complete", "artifacts": [] }
+> { "autofactory_phase": "flag", "status": "complete", "artifacts": ["enable-backend-status"] }
 > ```
 >
-> Use `research`, `flag`, `metrics`, `tests`, or `review` for
-> `autofactory_phase`. Use `complete` or `skipped` for `status`. Put any keys or
-> paths the phase created into `artifacts` — flag keys, metric keys, the
-> manifest path. Post this in addition to, not instead of, the final summary
-> comment.
+> - `autofactory_phase`: one of `research`, `flag`, `metrics`, `tests`, `review`.
+> - `status`: `complete` when the phase did its work; `skipped` when the phase
+>   did not run (for example, the research phase decided no flag is needed, or
+>   the chain cannot run at all). If you halt early, post a `skipped` block for
+>   every remaining phase before you stop.
+> - `artifacts`: the keys or paths the phase created. Flag keys for `flag`,
+>   metric keys for `metrics`, the manifest path for whichever phase wrote it,
+>   test file paths for `tests`. An empty array is fine.
+>
+> You may also post `{ "autofactory_phase": "<phase>", "status": "started" }`
+> when you begin a phase; it lights the gate's working lamp. It is optional.
+> The `complete` or `skipped` comment is not.
+>
+> These status comments are **in addition to** the final summary comment,
+> which must still end with the verdict as a fenced JSON block, again in strict
+> JSON:
+>
+> ```json
+> { "review_approved": true, "risk_level": "low" }
+> ```
+>
+> Post the summary and the verdict on the triggering pull request, not only
+> on the pull request you open.
+
+The dashboard is tolerant of sloppy JSON (single quotes, unquoted keys) and
+of comments landing on the agent's own pull request, but the *timing* is the
+thing only the prompt can fix: a comment that arrives at the end cannot open a
+gate in the middle.
 
 This is additive to the prompt only. It changes nothing about AutoFactory's
 architecture, which was the constraint.
