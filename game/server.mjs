@@ -254,9 +254,17 @@ function deriveState({ triggering, agent, comments }) {
       const status = normaliseStatus(obj.status);
       if (status) {
         const phase = byKey[obj.autofactory_phase];
-        phase.status = status; // later blocks for the same phase win
+        // Later blocks for the same phase win, with one exception: a phase that
+        // was reported complete stays complete. Two Automations bound to the
+        // same repo have been seen; when the second one cannot run it posts
+        // `skipped` for every phase, and that must not erase the first one's
+        // finished work.
+        if (phase.status === "complete" && status !== "complete") return;
+        phase.status = status;
         phase.source = "comment";
-        if (Array.isArray(obj.artifacts)) phase.artifacts = obj.artifacts.map(String);
+        if (Array.isArray(obj.artifacts) && (obj.artifacts.length || status !== "complete")) {
+          phase.artifacts = obj.artifacts.map(String);
+        }
       }
     }
     if ("review_approved" in obj) {

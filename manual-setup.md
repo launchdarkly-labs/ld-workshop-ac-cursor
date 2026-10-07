@@ -206,6 +206,24 @@ of comments landing on the agent's own pull request, but the *timing* is the
 thing only the prompt can fix: a comment that arrives at the end cannot open a
 gate in the middle.
 
+**Three more things learned in the 2026-10-07 dry run:**
+
+- **Reopening a pull request re-fires the Automation.** A second run started
+  the moment a closed PR was reopened, posted `skipped` for every phase, and
+  would have erased the first run's gates on the floor. The game now refuses to
+  downgrade a phase that was already reported complete (game 1.3.1). Tell
+  learners not to close and reopen their PR; if they must, expect a second run.
+- **The MCP OAuth session expired within 30 minutes.** The first run at 23:13
+  reached LaunchDarkly fine; the re-fired run at 23:39 got `401 token_expired`
+  on every MCP call. This confirms section 2: the MCP server must authenticate
+  with a long-lived API token, not an interactive sign-in.
+- **The Cloud Agent secret points at the wrong LaunchDarkly account.** The
+  re-fired run's REST fallback "authenticates successfully, but against a
+  different LaunchDarkly account": the session project did not exist there and
+  no project it could see held any `autofactory-*` config. The token in Cursor's
+  Cloud Agent secrets must belong to the same account that
+  `LAUNCHDARKLY_ACCESS_TOKEN` provisions the `instruqt-workshop` projects into.
+
 This is additive to the prompt only. It changes nothing about AutoFactory's
 architecture, which was the constraint.
 
