@@ -384,8 +384,18 @@ function deriveState({ triggering, agent, comments }) {
   };
 }
 
+const SERVER_STARTED_AT = Date.now();
+
 async function poll() {
-  const pulls = (await source.listPulls()).filter((pr) => pr.state === "open" || pr.merged_at);
+  const all = await source.listPulls();
+  // Open or merged PRs are the normal candidates. A PR that was closed without
+  // merging is ignored, since setup closes the previous session's PRs, EXCEPT
+  // when it was created after this server started: then it is this session's
+  // run and something else closed it (another sandbox's cleanup has done this),
+  // and the floor should keep showing the run rather than snap back to idle.
+  const pulls = all.filter(
+    (pr) => pr.state === "open" || pr.merged_at || Date.parse(pr.created_at || 0) > SERVER_STARTED_AT,
+  );
   const enriched = [];
   for (const pr of pulls) {
     const files = await source.files(pr);

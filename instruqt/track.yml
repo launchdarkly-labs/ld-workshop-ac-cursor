@@ -30,7 +30,7 @@ owner: launchdarkly
 developers:
 - kcochran@launchdarkly.com
 show_timer: true
-idle_timeout: 1200
+idle_timeout: 3600
 timelimit: 7200
 lab_config:
   sidebar_enabled: true

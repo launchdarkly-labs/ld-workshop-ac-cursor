@@ -347,11 +347,22 @@
     ctx.fillText("intake", 60, FLOOR_Y + 48);
     ctx.fillText(run === "complete" ? "shipped" : "exit", EXIT_X, FLOOR_Y + 48);
 
-    // Idle hint on the wall
+    // Idle hint: a sign hung on the ceiling beam, drawn after the gates so it
+    // is never hidden behind a shutter.
     if (run === "idle") {
-      ctx.fillStyle = PALETTE.muted;
+      const msg = "line idle — open a pull request to start the shift";
       ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
-      ctx.fillText("line idle — open a pull request to start the shift", W / 2, WALL_TOP + 40);
+      const w = ctx.measureText(msg).width + 24;
+      const x = W / 2 - w / 2;
+      const y = FLOOR_Y - 150;
+      ctx.fillStyle = "rgba(11, 14, 20, 0.92)";
+      ctx.fillRect(x, y, w, 26);
+      ctx.fillStyle = PALETTE.post;
+      ctx.fillRect(x, y, w, 2);
+      ctx.fillRect(x, y + 24, w, 2);
+      ctx.fillStyle = PALETTE.text;
+      ctx.textAlign = "center";
+      ctx.fillText(msg, W / 2, y + 17);
     }
   }
 
@@ -540,7 +551,7 @@
       let html = `<div class="title">${esc(p.label)}</div><div class="status">${status}</div>`;
       if (p.status !== "pending") html += `<small>${esc(p.openedBy)}</small>`;
       if (p.artifacts && p.artifacts.length) {
-        html += `<ul>${p.artifacts.slice(0, 4).map((a) => `<li>${artifactHtml(p.key, a)}</li>`).join("")}</ul>`;
+        html += `<ul>${p.artifacts.slice(0, 4).map((a) => `<li title="${esc(a)}">${artifactHtml(p.key, a)}</li>`).join("")}</ul>`;
       }
       card.innerHTML = html;
       overlay.appendChild(card);

@@ -100,8 +100,8 @@ body {
 .gate-card {
   position: absolute;
   transform: translateX(-50%);
-  width: 12.5%;
-  min-width: 96px;
+  width: 14%;
+  min-width: 120px;
   background: rgba(14, 17, 23, 0.86);
   border: 1px solid var(--line);
   border-radius: 4px;

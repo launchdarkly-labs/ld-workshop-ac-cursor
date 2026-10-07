@@ -41,8 +41,22 @@ PYTHONPATH="/opt/ld/util" python3 "/opt/ld/util/pool.py" release \
 ###################
 # AutoFactory: tidy the org repo (best-effort; setup resets it regardless)
 ###################
+# Only tidy if the repo still belongs to THIS session. Pool rows can be
+# released by the TTL sweeper while a sandbox is still alive; if the same pool
+# user is then handed to a new sandbox, that sandbox's setup resets the repo
+# and the learner opens new PRs. When this older sandbox finally ends, closing
+# "its" open PRs would close the new learner's work mid-run (seen 2026-10-07).
+# Setup leaves a session-specific commit on main; if the remote main no longer
+# matches our clone's main, the repo has moved on and we leave it alone.
 AF_REPO="${AF_REPO:-$(agent variable get af_repo 2>/dev/null || true)}"
-if [ -n "${AF_REPO:-}" ]; then
-  gh pr list --repo "$AF_REPO" --state open --json number -q '.[].number' \
-    | xargs -r -I {} gh pr close {} --repo "$AF_REPO" --delete-branch || true
+WORK=/opt/ld/autofactory-app
+if [ -n "${AF_REPO:-}" ] && [ -d "$WORK/.git" ]; then
+  LOCAL_MAIN="$(git -C "$WORK" rev-parse main 2>/dev/null || true)"
+  REMOTE_MAIN="$(gh api "repos/${AF_REPO}/git/ref/heads/main" --jq .object.sha 2>/dev/null || true)"
+  if [ -n "$LOCAL_MAIN" ] && [ "$LOCAL_MAIN" = "$REMOTE_MAIN" ]; then
+    gh pr list --repo "$AF_REPO" --state open --json number -q '.[].number' \
+      | xargs -r -I {} gh pr close {} --repo "$AF_REPO" --delete-branch || true
+  else
+    echo "Skipping PR tidy on $AF_REPO: remote main (${REMOTE_MAIN:-unknown}) is not this session's (${LOCAL_MAIN:-unknown}); another session owns the repo now"
+  fi
 fi
