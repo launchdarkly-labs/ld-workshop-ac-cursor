@@ -8,19 +8,19 @@ what remains.
 
 Rough order. Items 1 through 5 block the first dry run. Item 6 blocks the build.
 
-## Status as of 2026-09-16
+## Status as of 2026-10-07
 
 | Item | State |
 |---|---|
 | 1. App repos | **Done.** All twelve created, seeded, tagged `pristine`, pool users granted write. |
-| 2. LaunchDarkly MCP in Cursor | Pending. Web UI. |
-| 3. Cursor Automations | Pending. Web UI. |
-| 4. Per-phase status in the prompt | Pending. Goes in with item 3. |
+| 2. LaunchDarkly MCP in Cursor | Working as of 2026-10-07 (Cloud Agent secret). Earlier OAuth sign-in expired within 30 min; see section 2. |
+| 3. Cursor Automations | Working. The two fallback project-key lines are still in the prompt: the planner reports they 404 and falls back to the rule, so harmless, but delete them. |
+| 4. Per-phase status in the prompt | Working. Agent posts one review per phase. |
 | 5. Pool and sweeper | Table and sweeper reused as-is. **New:** the workstation's federated IAM role is applied (see 5). Sweeper invocation not yet re-confirmed. |
 | 6. Reference repos | **Done.** |
 | 7. VM image | **Done.** `launchdarkly/workshop-autofactory-cursor` saved from `scripts/build_script.sh`. |
 | Track on Instruqt | **Pushed** at `https://play.instruqt.com/manage/launchdarkly/tracks/ld-autofactory-cursor`, pointing at the real image. |
-| 8. Dry run | Not started. Blocked on items 2 and 3. |
+| 8. Dry run | **Items 1-3 done 2026-10-07** (browser-driven, two full sandboxes). Game replays history; full chain runs end to end; retooling honoured (`shift2-` prefix appeared). Items 4 and 5 still to do. |
 
 ---
 
@@ -332,10 +332,33 @@ identifiers. The remote already exists, so a push after local edits may need
    fallback-only, short-circuit, and rejected histories during the build.
 2. **One full session.** Single sandbox, watch a real chain end to end. Time each
    phase and write the numbers into challenge 03's assignment text.
+   **Done 2026-10-07, three runs.** Measured from `gh pr create`:
+
+   | Phase | Cold run | Warm runs |
+   |---|---|---|
+   | Intake (research) | 3:11 | 2:42, 2:13 |
+   | Flag Press | 2:43 | 1:58, 1:45 |
+   | Instrumentation | 4:15 | 2:41, 2:03 |
+   | Test Bench | 2:55 | 2:36, 2:44 |
+   | Quality Inspection | 17:04 (earlier run) | 17:04, 12:45 |
+   | PR to verdict | about 28 minutes | 28 and 23 minutes |
+
+   Review is the long pole every time. Challenge 03's text now says so.
+   Findings fixed during the run: `idle_timeout` 1200 stopped the sandbox
+   while the learner would be watching the floor (now 3600); `git diff`
+   paged; the learner's `git push` prompted for a password; the game read
+   conversation comments instead of PR reviews; a reopened PR re-fires the
+   Automation.
 3. **Retooling.** Verify challenge 05 — does the agent actually honour a naming
    convention added to its instructions in LaunchDarkly? Run it several times.
    The check script treats non-compliance as a warning rather than a failure for
    exactly this reason, but you want to know the real hit rate.
+   **1 for 1 so far (2026-10-07, full chain to an approved verdict and a
+   second agent PR):** the sentence was saved about two minutes
+   before the PR opened and the flag came back as `shift2-enable-greeting-refresh`.
+   Note the LaunchDarkly field is labelled **Agent task**, and the editor is
+   virtualised, so a DOM read of its text is not a reliable way to confirm a
+   save; the challenge 05 check (REST) is.
 4. **Two sandboxes at once.** Confirm the pool hands out different users and
    different repos, and that both chains run without interfering.
 5. **Ungraceful shutdown.** Kill a sandbox without letting cleanup run. Confirm
