@@ -43,14 +43,16 @@ Open the [LaunchDarkly](#tab-0) tab.
 1. From the left-hand navigation, click **Agents**, then **Configs**.
 2. Click **AutoFactory Flag Implementer Agent**.
 3. Click **Variations** in the top navigation.
-4. Expand the **Default Configuration** variation.
-5. Scroll to the very end of the instructions text and append this sentence on its own line, exactly as written:
+4. In the **Default Configuration** variation, click into the **Agent task** text.
+5. Move to the very end of the text and append this sentence on its own line, exactly as written:
 
 ```text
 Naming convention for this factory: every flag key you create must start with the prefix shift2- (for example shift2-enable-refresh-greeting). Apply the prefix to the flag key only, not to the flag name.
 ```
 
 6. Click **Review and save**, then **Save changes**.
+
+Do this before you open the second pull request. The implementer fetches its task when its phase begins, a few minutes after the pull request opens, so the rule has to be saved first.
 
 That is the whole retool. One sentence, saved in LaunchDarkly. The rule in the repo still says `enable-<descriptive-name>`, and the implementer's fetched instructions now say otherwise. You are about to find out which one wins. The fetched instructions are the ones the agent reads for how to do its job, so they should.
 

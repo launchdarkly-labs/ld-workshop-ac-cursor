@@ -569,8 +569,9 @@
   function renderPlacard() {
     const s = server;
     const flagKeys = (s.phases.find((p) => p.key === "flag") || {}).artifacts || [];
-    const metricKeys = (s.phases.find((p) => p.key === "metrics") || {}).artifacts || [];
-    const flagsOnly = flagKeys.filter((k) => !/\.release-flags\//.test(k) && !/\.json$/.test(k));
+    const isPath = (k) => /\.release-flags\//.test(k) || /\.json$/.test(k) || k.includes("/");
+    const metricKeys = ((s.phases.find((p) => p.key === "metrics") || {}).artifacts || []).filter((k) => !isPath(k));
+    const flagsOnly = flagKeys.filter((k) => !isPath(k));
 
     if (s.runState === "complete") {
       placard.hidden = false;

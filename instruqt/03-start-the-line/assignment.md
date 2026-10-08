@@ -103,9 +103,7 @@ Switch to the [Factory Floor](#tab-0) tab and stay there.
 
 Flaglings walk in from the left, one for each file your pull request touched, and pile up against the **Intake** gate. They wait there until the research planner posts its brief to your pull request. Then the gate lifts and the crowd surges to the next one.
 
-Be patient with the first gate. It is the slowest, and not because the planner is slow. The cloud sandbox has to install the app's dependencies before any agent can run, and that happens once, up front. After that, each phase fetches its instructions from LaunchDarkly, does its work, and reports back. The whole chain takes several minutes end to end.
-
-<!-- Track owner: after the first timed dry run (manual-setup.md, section 8, item 2), replace "several minutes" above with the measured per-phase numbers. -->
+Here is what to expect, from timed runs of this exact change. The first gate takes about three minutes, because the cloud sandbox installs the app's dependencies before the planner can read anything. Flag Press, Instrumentation, and Test Bench each take two to four minutes. Quality Inspection is the long one: the reviewer reads the whole change set and routinely takes fifteen minutes or more. Call it twenty-five to thirty minutes from your `gh pr create` to the verdict. That is the real cost of five agents doing real work, and the floor shows exactly which one is working at any moment.
 
 If the floor sits at the first gate far longer than that with no comment on your pull request, look at the [GitHub](#tab-2) tab: open your repo at `https://github.com/[[ Instruqt-Var key="af_repo" hostname="workstation" ]]/pulls` and check whether the automation has said anything. From inside this sandbox a queued cloud agent and a stalled one look the same, and the pull request is where the difference shows first.
 

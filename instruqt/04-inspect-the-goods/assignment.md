@@ -53,13 +53,13 @@ cd /opt/ld/autofactory-app
 git fetch origin
 AGENT_BRANCH=$(gh pr list --repo "$AF_REPO" --state open --json headRefName -q '.[] | select(.headRefName != "shift-1-backend-status") | .headRefName' | head -1)
 git checkout "$AGENT_BRANCH"
-git diff --stat main...HEAD
+git --no-pager diff --stat main...HEAD
 ```
 
 You are looking at everything the agents changed. Now the manifest:
 
 ```text
-cat $(git diff --name-only main...HEAD | grep '^\.release-flags/')
+cat $(git --no-pager diff --name-only main...HEAD | grep '^\.release-flags/')
 ```
 
 It records the flag key, the target variation, the metric keys, and an empty `releaseIntent` block reserved for a human. It is a machine-readable statement of what got flagged and how to judge it. In a fuller setup, a release system reads this file after deploy and runs the rollout. Acting on it is out of scope for this track. Reading it is the point: the line's output is not just code, it is a record.
@@ -67,7 +67,7 @@ It records the flag key, the target variation, the metric keys, and an empty `re
 # The tests
 
 ```text
-git diff --name-only main...HEAD | grep -i test
+git --no-pager diff --name-only main...HEAD | grep -i test
 ```
 
 Open one and read it. There will be a flag-on case that asserts the new behaviour under `v1` and a flag-off case that asserts the old behaviour under `control`. The flag-off case is the one that matters most. It is the proof that turning this flag on later, and off again in a hurry, is safe.

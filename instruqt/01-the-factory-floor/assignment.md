@@ -58,9 +58,9 @@ Pick up the flag implementer's orders.
 
 1. Click **AutoFactory Flag Implementer Agent**.
 2. Click **Variations** in the top navigation.
-3. Expand the **Default Configuration** variation.
+3. Find the **Default Configuration** variation and its **Agent task** text.
 
-Read the instructions. Skim is fine. Notice what they are: plain text, in LaunchDarkly, describing how to name a flag, how to create it dark, how to wire the code so flag-off preserves existing behaviour, and which tools to use for each step. Notice what they are not: code in a repository. Nobody deploys anything to change them.
+Read it. Skim is fine. Notice what they are: plain text, in LaunchDarkly, describing how to name a flag, how to create it dark, how to wire the code so flag-off preserves existing behaviour, and which tools to use for each step. Notice what they are not: code in a repository. Nobody deploys anything to change them.
 
 # The running order
 
